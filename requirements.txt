@@ -9,14 +9,3 @@ SQLAlchemy>=2.0.36
 psycopg2-binary>=2.9.10
 python-dotenv
 gunicorn
-trafilatura
-email-validator
-flask
-flask-sqlalchemy
-flask-swagger-ui
-gunicorn
-marshmallow
-psycopg2-binary
-python-dotenv
-sqlalchemy
-yt-dlp
