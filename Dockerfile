@@ -1,65 +1,46 @@
-# Этап сборки
-FROM python:3.11-slim as builder
+# Используем официальный Python 3.11 образ на основе slim
+FROM python:3.11-slim
 
-# Установка необходимых системных зависимостей для сборки
+# Устанавливаем необходимые системные зависимости
 RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
-    libffi-dev \
+    pkg-config \
+    postgresql-client \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Создание и активация виртуального окружения
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Устанавливаем рабочую директорию
+WORKDIR /app
 
-# Установка зависимостей Python
+# Копируем файл зависимостей
 COPY requirements.txt .
+
+# Устанавливаем зависимости
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Основной этап
-FROM python:3.11-slim
+# Копируем все файлы проекта
+COPY . .
 
-# Копирование виртуального окружения из этапа сборки
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Создаём директорию для загрузок и устанавливаем права
+RUN mkdir -p downloads && chmod 755 downloads
 
-# Установка только необходимых runtime зависимостей
-RUN apt-get update && apt-get install -y \
-    libpq5 \
-    ffmpeg \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Копируем и настраиваем entrypoint скрипт
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Создание non-root пользователя
-RUN useradd -m -u 1000 app
-
-# Установка рабочей директории и прав
-WORKDIR /app
-RUN chown app:app /app
-
-# Копирование файлов проекта
-COPY --chown=app:app . .
-
-# Создание и настройка прав для директории загрузок
-RUN mkdir -p downloads && chown -R app:app downloads && chmod 755 downloads
-
-# Переключение на non-root пользователя
-USER app
-
-# Установка переменных окружения
-ENV FLASK_ENV=production \
-    FLASK_APP=app \
-    FLASK_PORT=8000 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    WORKERS=4
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl --fail http://localhost:8000/api/docs || exit 1
+# Устанавливаем переменные окружения
+ENV FLASK_ENV=production
+ENV FLASK_APP=app
+ENV FLASK_PORT=8000
+ENV SOURCE_DATE_EPOCH=315532800
 
 # Открываем порт
 EXPOSE 8000
 
-# Инициализация базы данных и запуск приложения
-CMD ["sh", "-c", "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --worker-class sync --worker-tmp-dir /dev/shm --timeout 120 --keep-alive 5 --max-requests 1000 --max-requests-jitter 50 --log-level info --access-logfile - --error-logfile -"]
+# Устанавливаем entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Команда запуска приложения через Gunicorn
+CMD ["gunicorn", "main:app", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120", "--keep-alive", "5", "--log-level", "info"]

@@ -22,7 +22,3 @@ marshmallow
 psycopg2-binary
 python-dotenv
 sqlalchemy
-gunicorn
-python-dotenv
-gunicorn
-python-dotenv
