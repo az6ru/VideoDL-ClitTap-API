@@ -46,11 +46,11 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "gunicorn main:app --bind 0.0.0.0:8000"
+args = "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"
 waitForPort = 8000
 
 [deployment]
-run = ["sh", "-c", "gunicorn main:app --bind 0.0.0.0:8000"]
+run = ["sh", "-c", "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"]
 deploymentTarget = "cloudrun"
 
 [[ports]]

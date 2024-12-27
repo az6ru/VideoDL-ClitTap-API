@@ -5,11 +5,14 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_swagger_ui import get_swaggerui_blueprint
 from sqlalchemy.orm import DeclarativeBase
 from dotenv import load_dotenv
+import time
+from sqlalchemy import exc
 
 # Load environment variables
 load_dotenv()
 
 logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class Base(DeclarativeBase):
     pass
@@ -19,16 +22,26 @@ app = Flask(__name__)
 
 # Configuration
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
+
+# Check if DATABASE_URL is provided
+if not os.environ.get("DATABASE_URL"):
+    raise RuntimeError("DATABASE_URL environment variable is not set")
+
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
     "pool_recycle": 300,
-    "pool_timeout": 20,
+    "pool_timeout": 30,
     "pool_size": 5,
     "max_overflow": 10,
     "connect_args": {
-        "connect_timeout": 10,
+        "connect_timeout": 30,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+        "application_name": "videodl-api"
     },
 }
 
@@ -62,11 +75,29 @@ def index():
 from api.routes import api_bp
 app.register_blueprint(api_bp, url_prefix='/api')
 
-# Initialize database tables
-with app.app_context():
-    import models
-    try:
-        db.create_all()
-        logging.info("Database tables created successfully")
-    except Exception as e:
-        logging.error(f"Error creating database tables: {e}")
+def init_db_with_retry(max_retries=5, retry_delay=5):
+    """Initialize database with retry mechanism"""
+    logger.info(f"Attempting to initialize database with DATABASE_URL: {os.environ.get('DATABASE_URL', 'Not set')}")
+
+    for attempt in range(max_retries):
+        try:
+            with app.app_context():
+                import models
+                db.create_all()
+                logger.info("Database tables created successfully")
+                return True
+        except exc.OperationalError as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database connection attempt {attempt + 1} failed: {str(e)}")
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Failed to initialize database after {max_retries} attempts: {str(e)}")
+                raise
+        except Exception as e:
+            logger.error(f"Unexpected error creating database tables: {str(e)}")
+            raise
+
+# Initialize database tables with retry mechanism only in production
+if os.environ.get("FLASK_ENV") != "development":
+    init_db_with_retry()
