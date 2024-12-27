@@ -11,23 +11,30 @@ from sqlalchemy import exc
 # Load environment variables
 load_dotenv()
 
+# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-class Base(DeclarativeBase):
-    pass
-
-db = SQLAlchemy(model_class=Base)
+# Initialize Flask app first
 app = Flask(__name__)
 
 # Configuration
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
 
-# Check if DATABASE_URL is provided
-if not os.environ.get("DATABASE_URL"):
-    raise RuntimeError("DATABASE_URL environment variable is not set")
+# Initialize SQLAlchemy with Base class
+class Base(DeclarativeBase):
+    pass
 
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+db = SQLAlchemy(model_class=Base)
+
+# Check if DATABASE_URL is provided and log its presence
+database_url = os.environ.get("DATABASE_URL")
+if not database_url:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
+logger.info(f"Database URL is configured: {database_url[:8]}...{database_url[-8:]}")
+
+# Database Configuration
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
@@ -45,7 +52,7 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     },
 }
 
-# Initialize extensions
+# Initialize the database
 db.init_app(app)
 
 # Swagger UI configuration
@@ -77,7 +84,7 @@ app.register_blueprint(api_bp, url_prefix='/api')
 
 def init_db_with_retry(max_retries=5, retry_delay=5):
     """Initialize database with retry mechanism"""
-    logger.info(f"Attempting to initialize database with DATABASE_URL: {os.environ.get('DATABASE_URL', 'Not set')}")
+    logger.info(f"Attempting to initialize database with DATABASE_URL: {database_url[:8]}...{database_url[-8:]}")
 
     for attempt in range(max_retries):
         try:

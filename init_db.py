@@ -15,10 +15,11 @@ def init_db(max_retries=5, retry_delay=5):
     load_dotenv()
 
     # Check if DATABASE_URL is provided
-    if not os.environ.get("DATABASE_URL"):
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
         raise RuntimeError("DATABASE_URL environment variable is not set")
 
-    logger.info(f"Initializing database with DATABASE_URL: {os.environ.get('DATABASE_URL', 'Not set')}")
+    logger.info(f"Initializing database with DATABASE_URL: {database_url[:8]}...{database_url[-8:]}")
 
     for attempt in range(max_retries):
         try:
