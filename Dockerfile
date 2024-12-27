@@ -52,8 +52,7 @@ ENV FLASK_ENV=production \
     FLASK_PORT=8000 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    WORKERS=4 \
-    SOURCE_DATE_EPOCH=315532800
+    WORKERS=4
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
@@ -62,16 +61,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 # Открываем порт
 EXPOSE 8000
 
-# Запуск приложения через Gunicorn с оптимизированными настройками
-CMD ["gunicorn", "main:app", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "4", \
-     "--worker-class", "sync", \
-     "--worker-tmp-dir", "/dev/shm", \
-     "--timeout", "120", \
-     "--keep-alive", "5", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "50", \
-     "--log-level", "info", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Инициализация базы данных и запуск приложения
+CMD ["sh", "-c", "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --worker-class sync --worker-tmp-dir /dev/shm --timeout 120 --keep-alive 5 --max-requests 1000 --max-requests-jitter 50 --log-level info --access-logfile - --error-logfile -"]

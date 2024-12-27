@@ -24,3 +24,5 @@ python-dotenv
 sqlalchemy
 gunicorn
 python-dotenv
+gunicorn
+python-dotenv
