@@ -6,7 +6,7 @@ nixPkgs = [
     "python311",
     "pkg-config",
     "postgresql",
-    "python311Packages.pip"  # Добавлено для установки pip
+    "python3Packages.pip"  # Убедитесь, что pip установлен
 ]
 
 [phases.install]
@@ -30,7 +30,7 @@ cmd = "gunicorn main:app --bind 0.0.0.0:${PORT:-8000} --workers 4 --timeout 120 
 DATABASE_URL = { value = "${DATABASE_URL}" }
 FLASK_ENV = { value = "production" }
 PYTHONPATH = { value = "." }
-NIXPACKS_PATH = { value = "/opt/venv/bin:/usr/local/bin" }  # Определение NIXPACKS_PATH
+NIXPACKS_PATH = { value = "/opt/venv/bin:/root/.nix-profile/bin:/usr/local/bin" }  # Определение NIXPACKS_PATH
 
 [start.environment]
 SOURCE_DATE_EPOCH = "315532800"
