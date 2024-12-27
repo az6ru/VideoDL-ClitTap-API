@@ -9,7 +9,11 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO if os.environ.get('FLASK_ENV') == 'production' else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 class Base(DeclarativeBase):
     pass
@@ -25,10 +29,10 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
     "pool_recycle": 300,
     "pool_timeout": 20,
-    "pool_size": 5,
-    "max_overflow": 10,
+    "pool_size": int(os.environ.get("DB_POOL_SIZE", "5")),
+    "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "10")),
     "connect_args": {
-        "connect_timeout": 10,
+        "connect_timeout": int(os.environ.get("DB_CONNECT_TIMEOUT", "10")),
     },
 }
 
@@ -58,15 +62,21 @@ app.register_blueprint(swaggerui_blueprint)
 def index():
     return redirect(url_for('swagger_ui.show'))
 
+# Initialize database tables
+def init_db():
+    with app.app_context():
+        import models
+        try:
+            db.create_all()
+            logging.info("Database tables created successfully")
+        except Exception as e:
+            logging.error(f"Error creating database tables: {e}")
+            raise
+
 # Register API routes
 from api.routes import api_bp
 app.register_blueprint(api_bp, url_prefix='/api')
 
-# Initialize database tables
-with app.app_context():
-    import models
-    try:
-        db.create_all()
-        logging.info("Database tables created successfully")
-    except Exception as e:
-        logging.error(f"Error creating database tables: {e}")
+# Initialize database if running directly
+if __name__ == '__main__':
+    init_db()
