@@ -1,5 +1,6 @@
+modules = ["python-3.11"]
 [workflows]
-runButton = "Flask Production Server"
+runButton = "Project"
 
 [[workflows.workflow]]
 name = "Project"
@@ -43,3 +44,13 @@ task = "packager.installForAll"
 task = "shell.exec"
 args = "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"
 waitForPort = 8000
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"]
+
+[[ports]]
+localPort = 8000
+externalPort = 80

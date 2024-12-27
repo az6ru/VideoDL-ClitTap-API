@@ -1,0 +1,26 @@
+[phases.setup]
+nixPkgs = [
+    'python311',
+    'python311Packages.pip',
+    'postgresql',
+    'gcc',
+    'ffmpeg',
+    'nodejs'
+]
+aptPkgs = ['python3-dev', 'libpq-dev']
+
+[phases.install]
+cmds = [
+    'python -m pip install --upgrade pip',
+    'pip install wheel setuptools',
+    'pip install gunicorn flask python-dotenv flask-sqlalchemy psycopg2-binary requests yt-dlp flask-swagger-ui'
+]
+
+[phases.build]
+cmds = ['python init_db.py']
+
+[start]
+cmd = 'gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info'
+
+[environment]
+PORT = "8000"
