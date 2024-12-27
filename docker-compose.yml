@@ -1,3 +1,29 @@
-To complete the task, we also need to create the following files:
+version: '3.8'
 
-**`.env`**
+services:
+  web:
+    build: .
+    ports:
+      - "${FLASK_PORT}:${FLASK_PORT}"
+    environment:
+      - FLASK_ENV=${FLASK_ENV}
+      - DATABASE_URL=${DATABASE_URL}
+    volumes:
+      - ./downloads:/app/downloads
+    depends_on:
+      - db
+    restart: always
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT}:5432"
+
+volumes:
+  postgres_data:
