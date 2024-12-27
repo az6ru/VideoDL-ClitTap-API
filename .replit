@@ -1,10 +1,5 @@
-modules = ["postgresql-16", "python-3.11"]
-
-[nix]
-channel = "stable-24_05"
-
 [workflows]
-runButton = "Project"
+runButton = "Flask Production Server"
 
 [[workflows.workflow]]
 name = "Project"
@@ -48,15 +43,3 @@ task = "packager.installForAll"
 task = "shell.exec"
 args = "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"
 waitForPort = 8000
-
-[deployment]
-run = ["sh", "-c", "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"]
-deploymentTarget = "cloudrun"
-
-[[ports]]
-localPort = 5000
-externalPort = 80
-
-[[ports]]
-localPort = 8000
-externalPort = 8000
