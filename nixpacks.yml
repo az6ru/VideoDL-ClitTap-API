@@ -1,0 +1,25 @@
+# nixpacks.yml
+
+# Определение процесса сборки
+build:
+  phases:
+    install:
+      commands:
+        - echo "Установка зависимостей..."
+        - python -m pip install --upgrade pip
+        - pip install -r requirements.txt
+    build:
+      commands:
+        - echo "Запуск инициализации базы данных..."
+        - python init_db.py
+
+# Определение процесса запуска
+run:
+  command: gunicorn main:app --bind 0.0.0.0:$PORT --workers 4
+  processes:
+    web: 1
+
+# Указание переменных окружения (опционально, можно также установить через UI Coolify)
+env:
+  FLASK_ENV: "production"
+  FLASK_PORT: "8000"
