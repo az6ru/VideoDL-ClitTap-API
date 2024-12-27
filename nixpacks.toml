@@ -1,0 +1,23 @@
+# nixpacks.toml
+
+[build]
+packages = ["ffmpeg"]
+
+[build.phases.install]
+commands = [
+  "echo 'Установка зависимостей...'",
+  "python -m pip install --upgrade pip",
+  "pip install -r requirements.txt"
+]
+
+[build.phases.build]
+commands = [
+  "echo 'Сборка приложения...'",
+  "python init_db.py"
+]
+
+[run]
+command = "gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 4"
+
+[run.processes]
+web = 1
