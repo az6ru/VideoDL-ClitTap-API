@@ -9,7 +9,7 @@ done
 echo "PostgreSQL is ready!"
 
 # Initialize database if needed
-python init_db.py
+python3 init_db.py
 
 # Start the application
-python main.py
+python3 main.py

@@ -1,8 +1,11 @@
 [phases.setup]
-nixPkgs = ['python311', 'postgresql', 'ffmpeg', 'netcat-gnu']
+nixPkgs = ['python311', 'postgresql', 'ffmpeg', 'netcat-gnu', 'python311Packages.pip']
 
 [phases.install]
-cmds = ['python -m pip install --upgrade pip', 'pip install -r requirements.txt']
+cmds = [
+    'python3 -m pip install --upgrade pip',
+    'python3 -m pip install -r requirements.txt'
+]
 
 [start]
 cmd = 'chmod +x start.sh && ./start.sh'
