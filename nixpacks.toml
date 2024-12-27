@@ -1,32 +1,8 @@
-
-# nixpacks.toml - Configuration for Coolify deployment
-
 [phases.setup]
-nixPkgs = [
-    "ffmpeg",
-    "python311Full",
-    "python311Packages.pip",
-    "pkg-config",
-    "postgresql"
-]
-
-[phases.install]
-cmds = [
-    "python3 -m pip install -r requirements.txt"
-]
-
-[phases.build]
-cmds = [
-    "mkdir -p downloads",
-    "chmod 755 downloads",
-    "python3 init_db.py"
-]
+nixPkgs = ['python311', 'postgresql']
 
 [start]
-cmd = "gunicorn main:app --bind 0.0.0.0:${PORT:-8000} --workers 4 --timeout 120 --keep-alive 5 --log-level info"
+cmd = "gunicorn main:app --bind 0.0.0.0:${FLASK_PORT:-8000}"
 
-[start.environment]
-SOURCE_DATE_EPOCH = "315532800"
-FLASK_APP = "app"
-FLASK_ENV = "production"
-PYTHONPATH = "."
+[deploy]
+startCommand = "python init_db.py && gunicorn main:app --bind 0.0.0.0:${FLASK_PORT:-8000}"

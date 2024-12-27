@@ -1,4 +1,8 @@
-modules = ["python-3.11"]
+modules = ["postgresql-16", "python-3.11"]
+
+[nix]
+channel = "stable-24_05"
+
 [workflows]
 runButton = "Project"
 
@@ -42,15 +46,17 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"
+args = "gunicorn main:app --bind 0.0.0.0:8000"
 waitForPort = 8000
 
-[nix]
-channel = "stable-24_05"
-
 [deployment]
-run = ["sh", "-c", "python init_db.py && gunicorn main:app --bind 0.0.0.0:8000 --workers 4 --timeout 120 --keep-alive 5 --log-level info"]
+run = ["sh", "-c", "gunicorn main:app --bind 0.0.0.0:8000"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
 
 [[ports]]
 localPort = 8000
-externalPort = 80
+externalPort = 8000
