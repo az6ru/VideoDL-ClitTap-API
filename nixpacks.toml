@@ -1,19 +1,19 @@
+
 # nixpacks.toml - Configuration for Coolify deployment
 
 [phases.setup]
 nixPkgs = [
     "ffmpeg",
-    "python311",
+    "python311Full",
     "pkg-config",
-    "postgresql",
-    "python3Packages.pip"  # Убедитесь, что pip установлен
+    "postgresql"
 ]
 
 [phases.install]
 cmds = [
+    "python3 -m ensurepip",
     "python3 -m pip install --upgrade pip",
-    "python3 -m pip install -r requirements.txt",
-    "python3 -m pip install python-dotenv gunicorn"
+    "python3 -m pip install -r requirements.txt"
 ]
 
 [phases.build]
@@ -30,7 +30,6 @@ cmd = "gunicorn main:app --bind 0.0.0.0:${PORT:-8000} --workers 4 --timeout 120 
 DATABASE_URL = { value = "${DATABASE_URL}" }
 FLASK_ENV = { value = "production" }
 PYTHONPATH = { value = "." }
-NIXPACKS_PATH = { value = "/opt/venv/bin:/root/.nix-profile/bin:/usr/local/bin" }  # Определение NIXPACKS_PATH
 
 [start.environment]
 SOURCE_DATE_EPOCH = "315532800"
