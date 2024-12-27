@@ -1,0 +1,55 @@
+/* Dark theme with high contrast */
+:root {
+    --bg-color: #1a1a1a;
+    --text-color: #ffffff;
+    --code-bg: #2d2d2d;
+    --border-color: #404040;
+    --primary-color: #4CAF50;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+}
+
+.swagger-ui {
+    font-family: 'Source Code Pro', monospace;
+}
+
+.swagger-ui .topbar {
+    background-color: var(--bg-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.swagger-ui .info {
+    background-color: var(--bg-color);
+}
+
+.swagger-ui .scheme-container {
+    background-color: var(--bg-color);
+}
+
+.swagger-ui .opblock {
+    background-color: var(--code-bg);
+    border: 1px solid var(--border-color);
+}
+
+.swagger-ui .opblock .opblock-summary {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.swagger-ui .response-col_status {
+    color: var(--primary-color);
+}
+
+.swagger-ui .highlight-code {
+    background-color: var(--code-bg);
+}
+
+.swagger-ui .responses-table td {
+    border-color: var(--border-color);
+}
+
+.swagger-ui button {
+    background-color: var(--primary-color);
+}

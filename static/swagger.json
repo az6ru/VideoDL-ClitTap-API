@@ -1,0 +1,435 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Video Metadata Service API",
+    "version": "1.0.0",
+    "description": "API for retrieving video metadata, formats and managing downloads"
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "paths": {
+    "/info": {
+      "get": {
+        "summary": "Get basic video information",
+        "description": "Returns only basic metadata about the video without formats",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Video URL"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Basic video information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid URL"
+          }
+        }
+      }
+    },
+    "/formats": {
+      "get": {
+        "summary": "Get available video formats",
+        "description": "Returns a list of all available formats for the video. When filtered=true, returns optimized format bundles for SD, HD, and FullHD quality.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Video URL"
+          },
+          {
+            "name": "filtered",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "When true, returns optimized format bundles for SD, HD, and FullHD quality"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of available formats or filtered format bundles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Format"
+                      },
+                      "description": "List of all available formats when filtered=false"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "formats": {
+                          "type": "object",
+                          "properties": {
+                            "SD": {
+                              "$ref": "#/components/schemas/FormatBundle"
+                            },
+                            "HD": {
+                              "$ref": "#/components/schemas/FormatBundle"
+                            },
+                            "FullHD": {
+                              "$ref": "#/components/schemas/FormatBundle"
+                            }
+                          }
+                        }
+                      },
+                      "description": "Format bundles grouped by quality when filtered=true"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid URL"
+          }
+        }
+      }
+    },
+    "/download": {
+      "get": {
+        "summary": "Create download task",
+        "description": "Creates a new task to download video in specified format. The format should be one of the format_id values returned by /formats endpoint. The response includes basic information about the selected format.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Video URL to download"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Single format ID for videos with embedded audio"
+          },
+          {
+            "name": "video_format_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Video format ID from /formats endpoint. Required if format is not specified"
+          },
+          {
+            "name": "audio_format_id", 
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Audio format ID from /formats endpoint. Required if format is not specified"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Download task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Download"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - URL parameter is missing or invalid"
+          }
+        }
+      }
+    },
+    "/download/{task_id}": {
+      "get": {
+        "summary": "Get download task status",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Download task status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Download"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/download/{task_id}/file": {
+      "get": {
+        "summary": "Download the completed file",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File download",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Download not completed yet"
+          },
+          "404": {
+            "description": "Task or file not found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FormatBundle": {
+        "type": "object",
+        "properties": {
+          "video": {
+            "$ref": "#/components/schemas/Format",
+            "description": "Video format information"
+          },
+          "audio": {
+            "$ref": "#/components/schemas/Format",
+            "description": "Audio format information"
+          }
+        }
+      },
+      "VideoInfo": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer",
+            "description": "Duration in seconds"
+          },
+          "thumbnail": {
+            "type": "string",
+            "description": "URL of the video thumbnail"
+          },
+          "view_count": {
+            "type": "integer"
+          },
+          "like_count": {
+            "type": "integer"
+          },
+          "comment_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "Format": {
+        "type": "object",
+        "properties": {
+          "format_id": {
+            "type": "string",
+            "description": "Unique identifier for the format"
+          },
+          "format": {
+            "type": "string",
+            "description": "Human readable format description"
+          },
+          "ext": {
+            "type": "string",
+            "description": "File extension (mp4, webm, etc)"
+          },
+          "resolution": {
+            "type": "string",
+            "description": "Video resolution (e.g., 720p, 1080p)"
+          },
+          "filesize": {
+            "type": ["integer", "null"],
+            "description": "Exact file size in bytes"
+          },
+          "filesize_approx": {
+            "type": ["integer", "null"],
+            "description": "Approximate file size in bytes"
+          },
+          "formatted_filesize": {
+            "type": ["string", "null"],
+            "description": "Formatted exact file size (e.g., '205.83MiB')"
+          },
+          "formatted_filesize_approx": {
+            "type": ["string", "null"],
+            "description": "Formatted approximate file size (e.g., '~205.83MiB')"
+          },
+          "vcodec": {
+            "type": "string",
+            "description": "Video codec"
+          },
+          "acodec": {
+            "type": "string",
+            "description": "Audio codec"
+          },
+          "tbr": {
+            "type": "number",
+            "description": "Total bitrate in KBit/s"
+          },
+          "fps": {
+            "type": "number",
+            "description": "Frames per second"
+          }
+        }
+      },
+      "Download": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Unique identifier for the download task"
+          },
+          "url": {
+            "type": "string",
+            "description": "Video URL"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "downloading", "completed", "error"],
+            "description": "Current status of the download"
+          },
+          "progress": {
+            "type": "number",
+            "description": "Download progress percentage"
+          },
+          "title": {
+            "type": "string",
+            "description": "Video title"
+          },
+          "format": {
+            "type": "string",
+            "description": "Selected format ID"
+          },
+          "video_format": {
+            "type": "string",
+            "description": "Selected video format ID"
+          },
+          "audio_format": {
+            "type": "string",
+            "description": "Selected audio format ID"
+          },
+          "format_info": {
+            "type": "object",
+            "description": "Information about the selected format",
+            "properties": {
+              "format": {
+                "type": "string",
+                "description": "Human readable format description"
+              },
+              "ext": {
+                "type": "string",
+                "description": "File extension (mp4, webm, etc)"
+              },
+              "resolution": {
+                "type": "string",
+                "description": "Video resolution"
+              },
+              "filesize": {
+                "type": "integer",
+                "description": "Exact file size in bytes"
+              },
+              "filesize_mb": {
+                "type": "number",
+                "description": "File size in megabytes"
+              },
+              "filesize_approx": {
+                "type": "integer",
+                "description": "Approximate file size in bytes"
+              },
+              "filesize_approx_mb": {
+                "type": "number",
+                "description": "Approximate file size in megabytes"
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Task creation timestamp"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Task completion timestamp"
+          },
+          "download_url": {
+            "type": "string",
+            "description": "URL для загрузки файла через /api/download/{task_id}/file"
+          },
+          "file_url": {
+            "type": "string",
+            "description": "Прямая ссылка на файл с указанием расширения (например, .mp4 или .webm)"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if download failed"
+          }
+        }
+      }
+    }
+  }
+}

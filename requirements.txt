@@ -1,0 +1,9 @@
+Flask>=3.1.0
+Flask-SQLAlchemy>=3.1.1
+marshmallow>=3.23.1
+marshmallow-sqlalchemy==0.28.0
+Flask-Swagger-UI>=4.11.1
+yt-dlp>=2024.12.6
+Werkzeug>=2.1.0
+SQLAlchemy>=2.0.36
+psycopg2-binary>=2.9.10
