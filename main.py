@@ -1,5 +1,10 @@
 import logging
+import os
+from dotenv import load_dotenv
 from app import app
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -8,9 +13,12 @@ logging.basicConfig(
 )
 
 if __name__ == "__main__":
-    # Use production settings for deployment
+    # Use environment variables for configuration
+    port = int(os.getenv('FLASK_PORT', 8000))
+    debug = os.getenv('FLASK_ENV') == 'development'
+
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=False
+        port=port,
+        debug=debug
     )

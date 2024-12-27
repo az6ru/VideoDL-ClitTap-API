@@ -4,6 +4,10 @@ from flask import Flask, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_swagger_ui import get_swaggerui_blueprint
 from sqlalchemy.orm import DeclarativeBase
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -14,11 +18,18 @@ db = SQLAlchemy(model_class=Base)
 app = Flask(__name__)
 
 # Configuration
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "a secret key"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_recycle": 300,
     "pool_pre_ping": True,
+    "pool_recycle": 300,
+    "pool_timeout": 20,
+    "pool_size": 5,
+    "max_overflow": 10,
+    "connect_args": {
+        "connect_timeout": 10,
+    },
 }
 
 # Initialize extensions
@@ -51,6 +62,11 @@ def index():
 from api.routes import api_bp
 app.register_blueprint(api_bp, url_prefix='/api')
 
+# Initialize database tables
 with app.app_context():
     import models
-    db.create_all()
+    try:
+        db.create_all()
+        logging.info("Database tables created successfully")
+    except Exception as e:
+        logging.error(f"Error creating database tables: {e}")
