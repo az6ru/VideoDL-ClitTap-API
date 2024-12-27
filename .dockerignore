@@ -25,3 +25,7 @@ downloads/*
 .upm
 replit.nix
 *.lock
+
+# Docker
+Dockerfile
+docker-compose.yml
