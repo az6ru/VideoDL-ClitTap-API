@@ -1,24 +1,21 @@
-# nixpacks.toml
+# nixpacks.toml - Configuration for Coolify deployment
 
-[shell]
-file = "default.nix"
+[phases.setup]
+nixPkgs = ["ffmpeg"]
 
-[build]
-phases = {
-  install = [
-    "echo 'Установка зависимостей...'",
+[phases.install]
+cmds = [
     "python -m pip install --upgrade pip",
     "pip install -r requirements.txt"
-  ]
-  build = [
-    "echo 'Сборка приложения...'",
-    "python init_db.py",
-    "ffmpeg -version"
-  ]
-}
+]
 
-[run]
-command = "gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 4"
+[phases.build]
+cmds = [
+    "python init_db.py"
+]
 
-[run.processes]
-web = 1
+[start]
+cmd = "gunicorn app:app --bind 0.0.0.0:${PORT:-8000} --workers 4 --timeout 120 --keep-alive 5 --log-level info"
+
+[start.environment]
+SOURCE_DATE_EPOCH = "315532800"
