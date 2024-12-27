@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv
+.env
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Project specific
+downloads/*
+!downloads/.gitkeep
+.replit
+.upm
+replit.nix
+*.lock
