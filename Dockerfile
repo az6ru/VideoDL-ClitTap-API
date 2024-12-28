@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     postgresql-client \
     ffmpeg \
-    curl \  # Добавляем curl
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем рабочую директорию
