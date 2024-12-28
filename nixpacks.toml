@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ['python311', 'postgresql']
-
-[start]
-cmd = "gunicorn main:app --bind 0.0.0.0:${FLASK_PORT:-8000}"
-
-[deploy]
-startCommand = "python init_db.py && gunicorn main:app --bind 0.0.0.0:${FLASK_PORT:-8000}"
