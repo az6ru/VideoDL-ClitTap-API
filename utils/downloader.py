@@ -7,11 +7,22 @@ from datetime import datetime, timedelta
 import yt_dlp
 import shutil
 from models import Download
-from app import db
+from extensions import db
+from flask import current_app
 
 # Cache for video metadata
 from functools import lru_cache
 import hashlib
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Configure downloads directory
+downloads_dir = os.path.abspath('downloads')
+os.makedirs(downloads_dir, exist_ok=True)
+
+# Global variables
+cleanup_thread = None
 
 @lru_cache(maxsize=100)
 def get_cached_video_info(url):
@@ -23,12 +34,6 @@ def get_cached_formats(url, filtered=False):
     """Cache video formats to avoid repeated API calls"""
     cache_key = f"{url}_{filtered}"
     return get_video_formats(url, filtered)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Устанавливаем уровень логирования
-
-# Configure downloads directory
-downloads_dir = os.path.abspath('downloads')
-os.makedirs(downloads_dir, exist_ok=True)
 
 def get_video_info(url):
     """Get basic video information without formats"""
@@ -76,21 +81,17 @@ def format_size(size):
         return "Unknown"
 
 def get_filtered_formats(formats):
-    """Filter and group formats into SD, HD, and FullHD bundles"""
-    # Разделяем форматы на видео и аудио
+    """Filter and group formats into SD, HD, FullHD, 2K and 4K bundles"""
     video_formats = [f for f in formats if f.get('vcodec') != 'none']
-    audio_formats = [f for f in formats if f.get('acodec') in ('opus', 'mp4a.40.2') and f.get('vcodec') == 'none']
+    audio_formats = [f for f in formats if f.get('acodec') in ('opus', 'mp4a.40.2', 'mp3') and f.get('vcodec') == 'none']
     
-    # Сортируем аудио форматы по размеру и битрейту
     audio_formats.sort(key=lambda x: (
         x.get('filesize', float('inf')) if x.get('filesize') is not None else float('inf'),
         -(x.get('tbr', 0) or 0)
     ))
     
-    # Выбираем лучший аудио формат
     best_audio = next((f for f in audio_formats if f.get('tbr', 0) >= 48), audio_formats[0] if audio_formats else None)
     
-    # Функция для извлечения высоты из resolution
     def get_height(format_dict):
         resolution = format_dict.get('resolution', '')
         if 'x' in resolution:
@@ -104,6 +105,8 @@ def get_filtered_formats(formats):
     sd_formats = [f for f in video_formats if get_height(f) == 480]
     hd_formats = [f for f in video_formats if get_height(f) == 720]
     fullhd_formats = [f for f in video_formats if get_height(f) == 1080]
+    uhd2k_formats = [f for f in video_formats if get_height(f) == 1440]  # 2K (1440p)
+    uhd4k_formats = [f for f in video_formats if get_height(f) == 2160]  # 4K (2160p)
     
     # Если точные форматы не найдены, используем ближайшие
     if not sd_formats:
@@ -111,31 +114,77 @@ def get_filtered_formats(formats):
     if not hd_formats:
         hd_formats = [f for f in video_formats if get_height(f) in range(481, 721)]
     if not fullhd_formats:
-        fullhd_formats = [f for f in video_formats if get_height(f) >= 1080]
+        fullhd_formats = [f for f in video_formats if get_height(f) in range(721, 1081)]
+    if not uhd2k_formats:
+        uhd2k_formats = [f for f in video_formats if get_height(f) in range(1081, 1441)]
+    if not uhd4k_formats:
+        uhd4k_formats = [f for f in video_formats if get_height(f) >= 1441]
     
     # Сортируем форматы по битрейту (выбираем лучшее качество)
-    for formats_list in (sd_formats, hd_formats, fullhd_formats):
+    for formats_list in (sd_formats, hd_formats, fullhd_formats, uhd2k_formats, uhd4k_formats):
         formats_list.sort(key=lambda x: (-(x.get('tbr', 0) or 0)))
     
+    # Группируем аудио форматы по качеству
+    audio_qualities = {
+        'low': {'min_bitrate': 48, 'max_bitrate': 96},
+        'medium': {'min_bitrate': 96, 'max_bitrate': 160},
+        'high': {'min_bitrate': 160, 'max_bitrate': float('inf')}
+    }
+    
+    audio_by_quality = {}
+    for quality, limits in audio_qualities.items():
+        matching_formats = [f for f in audio_formats 
+                          if limits['min_bitrate'] <= (f.get('tbr', 0) or 0) < limits['max_bitrate']]
+        if matching_formats:
+            audio_by_quality[quality] = matching_formats[0]
+    
     # Формируем результат
-    result = {'formats': {}}
+    result = {
+        'formats': {},
+        'audio_only': {}
+    }
     
     if sd_formats:
         result['formats']['SD'] = {
             'video': sd_formats[0],
-            'audio': best_audio
+            'audio': best_audio,
+            'resolution': '480p'
         }
     
     if hd_formats:
         result['formats']['HD'] = {
             'video': hd_formats[0],
-            'audio': best_audio
+            'audio': best_audio,
+            'resolution': '720p'
         }
     
     if fullhd_formats:
         result['formats']['FullHD'] = {
             'video': fullhd_formats[0],
-            'audio': best_audio
+            'audio': best_audio,
+            'resolution': '1080p'
+        }
+    
+    if uhd2k_formats:
+        result['formats']['2K'] = {
+            'video': uhd2k_formats[0],
+            'audio': best_audio,
+            'resolution': '1440p'
+        }
+    
+    if uhd4k_formats:
+        result['formats']['4K'] = {
+            'video': uhd4k_formats[0],
+            'audio': best_audio,
+            'resolution': '2160p'
+        }
+    
+    # Добавляем форматы только аудио
+    for quality, format_data in audio_by_quality.items():
+        result['audio_only'][quality] = {
+            'format': format_data,
+            'quality': quality,
+            'bitrate': format_data.get('tbr', 0)
         }
     
     return result
@@ -162,9 +211,8 @@ def get_video_formats(url, filtered=False):
                 filesize_approx = f.get('filesize_approx')
                 tbr = f.get('tbr')
                 
-                # Если размеры отсутствуют, вычисляем их на основе tbr и длительности
                 if filesize is None and filesize_approx is None and tbr and duration:
-                    filesize_approx = int(tbr * duration * 125)  # tbr в килобитах
+                    filesize_approx = int(tbr * duration * 125)
                     logger.debug(f"Calculated approximate size from tbr: {filesize_approx}")
                 
                 logger.debug(f"Processing format {f.get('format_id')}: size={filesize}, approx={filesize_approx}, tbr={tbr}")
@@ -216,7 +264,6 @@ def verify_file_complete(file_path):
     logger.info(f"Verifying - Task ID: {task_id}, Directory: {task_dir}")
     
     try:
-        # Оптимизированный поиск файлов с использованием os.scandir
         def find_video_files(directory):
             video_extensions = {'.mp4', '.webm', '.mkv', '.m4a'}
             files = []
@@ -231,7 +278,6 @@ def verify_file_complete(file_path):
             logger.error(f"No video files found in {task_dir}")
             return False
         
-        # Используем самый новый файл
         actual_file = max(video_files, key=os.path.getmtime)
         logger.info(f"Selected file for verification: {actual_file}")
         
@@ -241,7 +287,6 @@ def verify_file_complete(file_path):
                 logger.error(f"File is empty: {actual_file}")
                 return False
             
-            # Оптимизированная проверка временных файлов
             temp_patterns = {'*.part', '*.ytdl', '*.temp'}
             has_temp_files = any(
                 any(entry.name.endswith(pat[1:]) for pat in temp_patterns)
@@ -253,9 +298,8 @@ def verify_file_complete(file_path):
                 logger.warning("Found temporary files")
                 return False
             
-            # Быстрая проверка стабильности файла
             initial_size = file_stat.st_size
-            time.sleep(0.5)  # Уменьшенное время ожидания
+            time.sleep(0.5)
             try:
                 current_size = os.path.getsize(actual_file)
                 if current_size != initial_size:
@@ -265,7 +309,6 @@ def verify_file_complete(file_path):
                 logger.error("Error accessing file during size check")
                 return False
             
-            # Ensure file is readable
             if not os.access(actual_file, os.R_OK):
                 logger.warning(f"Fixing permissions for {actual_file}")
                 try:
@@ -274,8 +317,7 @@ def verify_file_complete(file_path):
                     logger.error(f"Failed to set file permissions: {e}")
                     return False
             
-            from app import app
-            with app.app_context():
+            with current_app.app_context():
                 download = Download.query.filter_by(task_id=task_id).first()
                 if download and actual_file != download.file_path:
                     logger.info(f"Updating file path in database: {actual_file}")
@@ -294,57 +336,96 @@ def verify_file_complete(file_path):
         logger.error(f"Error verifying file: {str(e)}", exc_info=True)
         return False
 
-def create_progress_bar(progress, downloaded_bytes=None, total_bytes=None, speed=None, eta=None, width=50):
-    """Создает ASCII прогресс-бар с дополнительной информацией
-    Args:
-        progress: значение прогресса от 0 до 100
-        downloaded_bytes: скачанный объем в байтах
-        total_bytes: общий размер в байтах
-        speed: скорость загрузки в байтах/сек
-        eta: оставшееся время в секундах
-        width: ширина прогресс-бара
-    Returns:
-        str: отформатированный прогресс-бар
-    """
-    filled = int(width * progress / 100)
-    bar = '█' * filled + '░' * (width - filled)
+def format_time(seconds):
+    """Форматирует время в человекочитаемый вид"""
+    if not seconds:
+        return ""
     
-    # Форматируем размеры
-    if downloaded_bytes and total_bytes:
-        size_info = f"{format_size(downloaded_bytes)}/{format_size(total_bytes)}"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+    
+    if hours > 0:
+        return f"{hours}ч {minutes}м {seconds}с"
+    elif minutes > 0:
+        return f"{minutes}м {seconds}с"
     else:
-        size_info = ""
-        
-    # Форматируем скорость
-    if speed:
-        speed_info = f" @ {format_size(speed)}/s"
+        return f"{seconds}с"
+
+def create_progress_bar(progress, downloaded_bytes=None, total_bytes=None, speed=None, eta=None, width=50):
+    """Создает анимированный цветной прогресс-бар с дополнительной информацией"""
+    # ANSI цвета и стили
+    GREEN = '\033[38;5;82m'  # Яркий зеленый
+    BLUE = '\033[38;5;39m'   # Яркий синий
+    YELLOW = '\033[38;5;220m' # Яркий желтый
+    GRAY = '\033[38;5;240m'   # Серый для фона
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
+    
+    # Символы для анимации
+    FILL_CHAR = '█'
+    EMPTY_CHAR = '▒'
+    
+    # Вычисляем заполнение
+    filled_width = int(width * progress / 100)
+    remaining_width = width - filled_width
+    
+    # Создаем градиент для заполненной части
+    if filled_width > 0:
+        bar_fill = GREEN + FILL_CHAR * filled_width + RESET
     else:
-        speed_info = ""
-        
-    # Форматируем ETA
-    if eta:
-        eta_info = f" ETA {eta}"
+        bar_fill = ""
+    
+    # Создаем фон для незаполненной части
+    if remaining_width > 0:
+        bar_empty = GRAY + EMPTY_CHAR * remaining_width + RESET
     else:
-        eta_info = ""
-        
+        bar_empty = ""
+    
+    # Собираем прогресс-бар
+    bar = f"{bar_fill}{bar_empty}"
+    
+    # Форматируем основную информацию
+    progress_text = f"{BOLD}{progress:.1f}%{RESET}"
+    
+    # Информация о размере
+    if downloaded_bytes is not None and total_bytes is not None:
+        size_text = f"{BLUE}{format_size(downloaded_bytes)}{RESET} из {BLUE}{format_size(total_bytes)}{RESET}"
+    else:
+        size_text = ""
+    
+    # Информация о скорости
+    if speed is not None:
+        speed_text = f"{YELLOW}{format_size(speed)}/с{RESET}"
+    else:
+        speed_text = ""
+    
+    # Оставшееся время
+    if eta is not None:
+        eta_text = f"осталось {format_time(eta)}"
+    else:
+        eta_text = ""
+    
+    # Собираем все компоненты статистики
     stats = []
-    if size_info:
-        stats.append(size_info)
-    if speed_info:
-        stats.append(speed_info)
-    if eta_info:
-        stats.append(eta_info)
-        
-    stats_str = " ".join(stats)
-    return f"\r[{bar}] {progress:.1f}% {stats_str}"
+    if size_text:
+        stats.append(size_text)
+    if speed_text:
+        stats.append(speed_text)
+    if eta_text:
+        stats.append(eta_text)
+    
+    stats_str = " │ ".join(stats)  # Используем вертикальную черту для разделения
+    
+    # Очищаем текущую строку и выводим прогресс-бар
+    return f"\r\033[K[{bar}] {progress_text} {stats_str}"
 
 def download_progress_hook(d):
     """Progress hook для отслеживания процесса загрузки с визуальным прогресс-баром"""
     task_id = d['task_id']
     
     try:
-        from app import app
-        with app.app_context():
+        with current_app.app_context():
             if d['status'] == 'downloading':
                 progress = 0
                 if 'total_bytes_estimate' in d:
@@ -360,7 +441,6 @@ def download_progress_hook(d):
                 })
                 db.session.commit()
 
-                # Собираем информацию о прогрессе
                 downloaded_bytes = d.get('downloaded_bytes', 0)
                 total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
                 speed = d.get('speed')
@@ -373,8 +453,8 @@ def download_progress_hook(d):
                     speed=speed,
                     eta=eta
                 )
-                if progress > 0:  # Показываем только если есть прогресс
-                    print(f"\033[K{progress_bar}", end="", flush=True)  # \033[K очищает строку
+                if progress > 0:
+                    print(f"\033[K{progress_bar}", end="", flush=True)
                 
             elif d['status'] == 'finished':
                 logger.info(f"Download finished for task {task_id}")
@@ -399,7 +479,6 @@ def download_progress_hook(d):
                 db.session.add(download)
                 db.session.commit()
                 
-                # Verify file with retries
                 max_retries = 3
                 retry_delay = 2
                 
@@ -434,9 +513,11 @@ def download_progress_hook(d):
     except Exception as e:
         logger.error(f"Error in progress hook: {str(e)}", exc_info=True)
 
-def download_video(app, task_id, url, video_format_id=None, audio_format_id=None, format_id=None):
+def download_video(task_id, url, video_format_id=None, audio_format_id=None, format_id=None, audio_only=False, convert_to_mp3=False):
     """Download video with specified format or separate video/audio formats"""
-    with app.app_context():
+    from app import app  # Импортируем приложение здесь
+    
+    with app.app_context():  # Используем правильный контекст приложения
         logger.info(f"Starting download for task {task_id}")
         if format_id:
             logger.info(f"Download parameters - URL: {url}, Format: {format_id}")
@@ -448,11 +529,9 @@ def download_video(app, task_id, url, video_format_id=None, audio_format_id=None
                 info = ydl.extract_info(url, download=False)
                 logger.info(f"Successfully extracted video info: {info.get('title')}")
                 
-                # Создаем директорию для задачи
                 task_dir = os.path.join(downloads_dir, task_id)
                 os.makedirs(task_dir, mode=0o755, exist_ok=True)
                 
-                # Чистим старые файлы в директории задачи
                 for f in os.listdir(task_dir):
                     file_path = os.path.join(task_dir, f)
                     if os.path.isfile(file_path):
@@ -460,7 +539,20 @@ def download_video(app, task_id, url, video_format_id=None, audio_format_id=None
                         logger.debug(f"Removed existing file: {file_path}")
                 
                 output_template = os.path.join(task_dir, f"{task_id}.%(ext)s")
-                format_spec = format_id if format_id else f"{video_format_id}+{audio_format_id}"
+                
+                if audio_only:
+                    format_spec = audio_format_id
+                    postprocessors = [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3' if convert_to_mp3 else None,
+                        'preferredquality': '192' if convert_to_mp3 else None,
+                    }] if convert_to_mp3 else []
+                else:
+                    format_spec = format_id if format_id else f"{video_format_id}+{audio_format_id}"
+                    postprocessors = [{
+                        'key': 'FFmpegVideoRemuxer',
+                        'preferedformat': 'mp4',
+                    }]
                 
                 ydl_opts = {
                     'format': format_spec,
@@ -468,11 +560,8 @@ def download_video(app, task_id, url, video_format_id=None, audio_format_id=None
                         lambda d: download_progress_hook({**d, 'task_id': task_id})
                     ],
                     'outtmpl': output_template,
-                    'merge_output_format': 'mp4',
-                    'postprocessors': [{
-                        'key': 'FFmpegVideoRemuxer',
-                        'preferedformat': 'mp4',
-                    }],
+                    'merge_output_format': 'mp4' if not audio_only else None,
+                    'postprocessors': postprocessors,
                     'writethumbnail': False,
                     'writesubtitles': False,
                     'overwrites': True,
@@ -481,17 +570,28 @@ def download_video(app, task_id, url, video_format_id=None, audio_format_id=None
                     'quiet': False,
                     'no_warnings': False,
                     'ignoreerrors': False,
-                    'retries': 5,
-                    'fragment_retries': 5,
-                    # Оптимизация параметров загрузки
-                    'concurrent_fragments': 8,  # Параллельная загрузка фрагментов
-                    'buffersize': 1024 * 16,   # Увеличенный размер буфера
-                    'file_access_retries': 3,   # Уменьшено количество повторов доступа к файлу
-                    'throttledratelimit': None, # Отключение ограничения скорости
-                    'sleep_interval': 0,        # Отключение задержки между запросами
-                    'max_sleep_interval': 0,    # Отключение максимальной задержки
-                    'socket_timeout': 30,       # Таймаут сокета
-                    'thread_count': 8           # Количество потоков для загрузки
+                    'retries': 10,
+                    'fragment_retries': 10,
+                    'concurrent_fragments': 16,
+                    'buffersize': 1024 * 32,
+                    'file_access_retries': 5,
+                    'throttledratelimit': None,
+                    'sleep_interval': 0,
+                    'max_sleep_interval': 0,
+                    'socket_timeout': 60,
+                    'http_chunk_size': 1024 * 1024,
+                    'thread_count': 16,
+                    'external_downloader': 'aria2c',
+                    'external_downloader_args': [
+                        '-j', '16',
+                        '-x', '16',
+                        '-s', '16',
+                        '--min-split-size', '1M',
+                        '--max-connection-per-server', '16',
+                        '--optimize-concurrent-downloads',
+                        '--file-allocation=none',
+                        '--auto-file-renaming=false'
+                    ]
                 }
                 
                 logger.debug(f"YouTube-DL options: {ydl_opts}")
@@ -517,29 +617,30 @@ def download_video(app, task_id, url, video_format_id=None, audio_format_id=None
                 db.session.add(download)
                 db.session.commit()
 
-def cleanup_old_files(retention_minutes=5):
+def cleanup_old_files(app, retention_hours=24):
     """Очистка старых файлов по истечении времени хранения
+    
     Args:
-        retention_minutes: время хранения файлов в минутах (по умолчанию 5 минут)
+        app: Объект Flask приложения
+        retention_hours (int): Время хранения файлов в часах
     """
     while True:
         try:
             current_time = datetime.utcnow()
-            cleanup_before = current_time - timedelta(minutes=retention_minutes)
+            cleanup_before = current_time - timedelta(hours=retention_hours)
             
-            for task_dir in glob.glob(os.path.join(downloads_dir, '*')):
-                if not os.path.isdir(task_dir):
-                    continue
-                
-                task_id = os.path.basename(task_dir)
-                from app import app
-                with app.app_context():
+            with app.app_context():
+                for task_dir in glob.glob(os.path.join(downloads_dir, '*')):
+                    if not os.path.isdir(task_dir):
+                        continue
+                    
+                    task_id = os.path.basename(task_dir)
                     download = Download.query.filter_by(task_id=task_id).first()
                     if not download:
                         continue
                     
                     if download.completed_at and download.completed_at < cleanup_before:
-                        logger.info(f"Cleaning up task directory: {task_dir}")
+                        logger.info(f"Cleaning up task directory: {task_dir} (older than {retention_hours} hours)")
                         try:
                             shutil.rmtree(task_dir)
                             download.file_path = None
@@ -551,44 +652,74 @@ def cleanup_old_files(retention_minutes=5):
         except Exception as e:
             logger.error(f"Error in cleanup thread: {e}")
             
-        time.sleep(60)
+        # Проверяем каждый час
+        time.sleep(3600)
 
-# Запуск потока очистки с настраиваемым временем хранения
-cleanup_thread = None
-
-def start_cleanup_thread(retention_minutes=5):
-    """Запускает поток очистки с указанным временем хранения файлов"""
+def start_cleanup_thread(app, retention_hours=None):
+    """Запускает поток очистки с указанным временем хранения файлов
+    
+    Args:
+        app: Объект Flask приложения
+        retention_hours (int, optional): Время хранения файлов в часах. 
+            Если не указано, берется из переменной окружения CLEANUP_RETENTION_HOURS 
+            или используется значение по умолчанию 24 часа.
+    """
     global cleanup_thread
     if cleanup_thread is not None:
         return
     
+    if retention_hours is None:
+        retention_hours = int(os.environ.get('CLEANUP_RETENTION_HOURS', 24))
+    
+    logger.info(f"Starting cleanup thread with retention time: {retention_hours} hours")
+    
     cleanup_thread = threading.Thread(
         target=cleanup_old_files,
-        args=(retention_minutes,),
+        args=(app, retention_hours),
         daemon=True
     )
     cleanup_thread.start()
 
-# Запускаем поток очистки с дефолтным значением
-start_cleanup_thread()
-
-def start_download_task(task_id, url, video_format_id=None, audio_format_id=None, format_id=None, retention_minutes=5):
-    """Запуск асинхронной задачи на скачивание
-    Args:
-        task_id: идентификатор задачи
-        url: URL видео
-        video_format_id: ID формата видео
-        audio_format_id: ID формата аудио
-        format_id: ID единого формата
-        retention_minutes: время хранения файла в минутах
-    """
-    from app import app
+def start_download_task(task_id, url, video_format_id=None, audio_format_id=None, format_id=None, audio_only=False, convert_to_mp3=False):
+    """Запуск асинхронной задачи на скачивание"""
     thread = threading.Thread(target=download_video,
-                            args=(app, task_id, url),
+                            args=(task_id, url),
                             kwargs={
                                 'video_format_id': video_format_id,
                                 'audio_format_id': audio_format_id,
-                                'format_id': format_id
+                                'format_id': format_id,
+                                'audio_only': audio_only,
+                                'convert_to_mp3': convert_to_mp3
                             })
     thread.daemon = True
     thread.start()
+
+def get_available_resolutions(url):
+    """Получить список всех доступных разрешений для видео"""
+    logger.info(f"Получение доступных разрешений для URL: {url}")
+    
+    try:
+        formats = get_cached_formats(url, filtered=True)
+        available_resolutions = []
+        
+        resolution_mapping = {
+            'SD': '480p',
+            'HD': '720p',
+            'FullHD': '1080p',
+            '2K': '1440p',
+            '4K': '2160p'
+        }
+        
+        for quality, data in formats.get('formats', {}).items():
+            resolution = resolution_mapping.get(quality)
+            if resolution:
+                available_resolutions.append({
+                    'quality': quality,
+                    'resolution': resolution,
+                    'filesize': data['video'].get('formatted_filesize') or data['video'].get('formatted_filesize_approx')
+                })
+        
+        return available_resolutions
+    except Exception as e:
+        logger.error(f"Ошибка при получении доступных разрешений: {str(e)}")
+        raise

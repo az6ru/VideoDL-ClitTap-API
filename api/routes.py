@@ -2,19 +2,173 @@ import os
 import glob
 import time
 from uuid import UUID
+import secrets
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, send_file
 from marshmallow import ValidationError
-from app import db
-from models import Download
+from extensions import db
+from models import Download, ApiKey
 from api.schemas import VideoInfoSchema, DownloadSchema
 from utils.downloader import get_cached_video_info, get_cached_formats, start_download_task
+from api.middleware import require_api_key
 import logging
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
 
+def generate_api_key():
+    """Генерация случайного API ключа"""
+    return secrets.token_hex(32)
+
+def check_auth(username, password):
+    """Проверяет учетные данные для базовой аутентификации"""
+    return (username == os.environ.get('AUTH_USERNAME') and 
+            password == os.environ.get('AUTH_PASSWORD'))
+
+def authenticate():
+    """Отправляет 401 ответ с запросом базовой аутентификации"""
+    return jsonify({
+        'error': 'Требуется аутентификация',
+        'message': 'Для получения API токена необходимо предоставить учетные данные'
+    }), 401, {'WWW-Authenticate': 'Basic realm="Получение API токена"'}
+
+def requires_auth(f):
+    """Декоратор для базовой аутентификации"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
+@api_bp.route('/token', methods=['POST'])
+@requires_auth
+def create_token():
+    """Создание нового API токена"""
+    try:
+        name = request.json.get('name', 'API Token')
+        # Получаем настройки из переменных окружения
+        expiry_days = int(os.environ.get('TOKEN_EXPIRY_DAYS', 30))
+        rate_limit = int(os.environ.get('DEFAULT_RATE_LIMIT', 1000))
+        
+        api_key = ApiKey(
+            key=secrets.token_hex(32),
+            name=name,
+            is_active=True,
+            expires_at=datetime.utcnow() + timedelta(days=expiry_days),
+            rate_limit=rate_limit
+        )
+        
+        db.session.add(api_key)
+        db.session.commit()
+        
+        return jsonify({
+            'token': api_key.key,
+            'name': api_key.name,
+            'expires_at': api_key.expires_at.isoformat(),
+            'rate_limit': api_key.rate_limit
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"Error creating API token: {str(e)}")
+        return jsonify({'error': 'Ошибка при создании токена'}), 500
+
+@api_bp.route('/keys', methods=['POST'])
+def create_api_key():
+    """Создать новый API ключ"""
+    try:
+        data = request.get_json()
+        if not data or 'name' not in data:
+            return jsonify({'error': 'Name is required'}), 400
+
+        name = data['name']
+        expires_in_days = data.get('expires_in_days', 365)  # По умолчанию ключ действует 1 год
+        rate_limit = data.get('rate_limit', 100)  # По умолчанию 100 запросов в минуту
+
+        key = ApiKey(
+            key=generate_api_key(),
+            name=name,
+            expires_at=datetime.utcnow() + timedelta(days=expires_in_days),
+            rate_limit=rate_limit
+        )
+
+        db.session.add(key)
+        db.session.commit()
+
+        return jsonify({
+            'key': key.key,
+            'name': key.name,
+            'expires_at': key.expires_at.isoformat() if key.expires_at else None,
+            'rate_limit': key.rate_limit
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Error creating API key: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/keys/<key>', methods=['GET'])
+def get_api_key_info(key):
+    """Получить информацию об API ключе"""
+    try:
+        api_key = ApiKey.query.filter_by(key=key).first()
+        if not api_key:
+            return jsonify({'error': 'API key not found'}), 404
+
+        return jsonify({
+            'name': api_key.name,
+            'is_active': api_key.is_active,
+            'created_at': api_key.created_at.isoformat(),
+            'last_used_at': api_key.last_used_at.isoformat() if api_key.last_used_at else None,
+            'expires_at': api_key.expires_at.isoformat() if api_key.expires_at else None,
+            'rate_limit': api_key.rate_limit,
+            'downloads_count': api_key.downloads_count
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting API key info: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/keys/<key>', methods=['DELETE'])
+def delete_api_key(key):
+    """Удалить API ключ"""
+    try:
+        api_key = ApiKey.query.filter_by(key=key).first()
+        if not api_key:
+            return jsonify({'error': 'API key not found'}), 404
+
+        db.session.delete(api_key)
+        db.session.commit()
+
+        return '', 204
+
+    except Exception as e:
+        logger.error(f"Error deleting API key: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/keys/<key>/deactivate', methods=['POST'])
+def deactivate_api_key(key):
+    """Деактивировать API ключ"""
+    try:
+        api_key = ApiKey.query.filter_by(key=key).first()
+        if not api_key:
+            return jsonify({'error': 'API key not found'}), 404
+
+        api_key.is_active = False
+        db.session.add(api_key)
+        db.session.commit()
+
+        return jsonify({'message': 'API key deactivated'})
+
+    except Exception as e:
+        logger.error(f"Error deactivating API key: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Добавляем декоратор require_api_key ко всем эндпоинтам, требующим авторизации
 @api_bp.route('/info', methods=['GET'])
+@require_api_key
 def get_info():
     """Get basic video metadata without formats"""
     url = request.args.get('url')
@@ -29,6 +183,7 @@ def get_info():
         return jsonify({'error': str(e)}), 400
 
 @api_bp.route('/formats', methods=['GET'])
+@require_api_key
 def get_formats():
     """Get available video formats"""
     url = request.args.get('url')
@@ -45,6 +200,7 @@ def get_formats():
         return jsonify({'error': str(e)}), 400
 
 @api_bp.route('/download', methods=['GET'])
+@require_api_key
 def create_download():
     """Create download task"""
     try:
@@ -55,71 +211,134 @@ def create_download():
         format_id = request.args.get('format')
         video_format_id = request.args.get('video_format_id')
         audio_format_id = request.args.get('audio_format_id')
+        audio_only = request.args.get('audio_only', 'false').lower() == 'true'
+        convert_to_mp3 = request.args.get('convert_to_mp3', 'false').lower() == 'true'
         
-        if not format_id and (not video_format_id or not audio_format_id):
+        if audio_only:
+            if not audio_format_id and not format_id:
+                return jsonify({'error': 'Either format or audio_format_id is required for audio download'}), 400
+        elif not format_id and (not video_format_id or not audio_format_id):
             return jsonify({'error': 'Either format or both video_format_id and audio_format_id are required'}), 400
             
         # Get video info for format validation
-        video_info = get_cached_formats(url)
+        formats = get_cached_formats(url, filtered=True)
+        video_info = get_cached_formats(url, filtered=False)
         
         if format_id:
-            # Check single format existence
-            selected_format = None
-            for f in video_info:
-                if f.get('format_id') == format_id:
-                    selected_format = f
-                    break
-            
-            if not selected_format:
-                return jsonify({'error': f'Invalid format ID: {format_id}'}), 400
-            
-            task_id = UUID(bytes=os.urandom(16))
-            download = Download(
-                task_id=task_id,
-                url=url,
-                format=format_id
-            )
+            # Проверяем, является ли format_id качеством видео (SD, HD, FullHD, 2K, 4K) или аудио (low, medium, high)
+            if format_id in ['SD', 'HD', 'FullHD', '2K', '4K']:
+                if format_id not in formats.get('formats', {}):
+                    return jsonify({'error': f'Quality {format_id} is not available for this video'}), 400
+                    
+                format_data = formats['formats'][format_id]
+                video_format_id = format_data['video']['format_id']
+                audio_format_id = format_data['audio']['format_id']
+                
+                # Получаем полную информацию о форматах для ответа
+                video_format = next((f for f in video_info if f.get('format_id') == video_format_id), {})
+                audio_format = next((f for f in video_info if f.get('format_id') == audio_format_id), {})
+                
+                task_id = UUID(bytes=os.urandom(16))
+                download = Download(
+                    task_id=task_id,
+                    url=url,
+                    video_format=video_format_id,
+                    audio_format=audio_format_id
+                )
+            elif format_id in ['low', 'medium', 'high']:
+                if format_id not in formats.get('audio_only', {}):
+                    return jsonify({'error': f'Audio quality {format_id} is not available for this video'}), 400
+                    
+                format_data = formats['audio_only'][format_id]
+                audio_format_id = format_data['format']['format_id']
+                
+                task_id = UUID(bytes=os.urandom(16))
+                download = Download(
+                    task_id=task_id,
+                    url=url,
+                    audio_format=audio_format_id
+                )
+            else:
+                # Проверяем существование одиночного формата по ID
+                selected_format = None
+                for f in video_info:
+                    if f.get('format_id') == format_id:
+                        selected_format = f
+                        break
+                
+                if not selected_format:
+                    return jsonify({'error': f'Invalid format ID: {format_id}'}), 400
+                
+                task_id = UUID(bytes=os.urandom(16))
+                download = Download(
+                    task_id=task_id,
+                    url=url,
+                    format=format_id
+                )
         else:
-            # Check video and audio format existence
-            video_format = None
-            audio_format = None
-            for f in video_info:
-                if f.get('format_id') == video_format_id and f.get('vcodec') != 'none':
-                    video_format = f
-                elif f.get('format_id') == audio_format_id and f.get('acodec') != 'none':
-                    audio_format = f
-            
-            if not video_format:
-                return jsonify({'error': f'Invalid video format ID: {video_format_id}'}), 400
-            if not audio_format:
-                return jsonify({'error': f'Invalid audio format ID: {audio_format_id}'}), 400
-            
-            task_id = UUID(bytes=os.urandom(16))
-            download = Download(
-                task_id=task_id,
-                url=url,
-                video_format=video_format_id,
-                audio_format=audio_format_id
-            )
+            if audio_only:
+                # Проверяем существование аудио формата
+                audio_format = next((f for f in video_info if f.get('format_id') == audio_format_id and f.get('acodec') != 'none'), None)
+                
+                if not audio_format:
+                    return jsonify({'error': f'Invalid audio format ID: {audio_format_id}'}), 400
+                
+                task_id = UUID(bytes=os.urandom(16))
+                download = Download(
+                    task_id=task_id,
+                    url=url,
+                    audio_format=audio_format_id
+                )
+            else:
+                # Проверяем существование видео и аудио форматов
+                video_format = None
+                audio_format = None
+                for f in video_info:
+                    if f.get('format_id') == video_format_id and f.get('vcodec') != 'none':
+                        video_format = f
+                    elif f.get('format_id') == audio_format_id and f.get('acodec') != 'none':
+                        audio_format = f
+                
+                if not video_format:
+                    return jsonify({'error': f'Invalid video format ID: {video_format_id}'}), 400
+                if not audio_format:
+                    return jsonify({'error': f'Invalid audio format ID: {audio_format_id}'}), 400
+                
+                task_id = UUID(bytes=os.urandom(16))
+                download = Download(
+                    task_id=task_id,
+                    url=url,
+                    video_format=video_format_id,
+                    audio_format=audio_format_id
+                )
             
         db.session.add(download)
         db.session.commit()
         
         # Start async download
-        if format_id:
+        if format_id and format_id not in ['SD', 'HD', 'FullHD', '2K', '4K', 'low', 'medium', 'high']:
             start_download_task(str(task_id), url, format_id=format_id)
         else:
-            start_download_task(str(task_id), url, video_format_id=video_format_id, audio_format_id=audio_format_id)
+            start_download_task(
+                str(task_id), 
+                url, 
+                video_format_id=video_format_id, 
+                audio_format_id=audio_format_id,
+                audio_only=audio_only,
+                convert_to_mp3=convert_to_mp3
+            )
         
         # Prepare response
         response = {
             'task_id': str(download.task_id),
             'url': download.url,
-            'created_at': download.created_at.isoformat()
+            'created_at': download.created_at.isoformat(),
+            'audio_only': audio_only,
+            'convert_to_mp3': convert_to_mp3
         }
 
         # Add format specific information
-        if format_id:
+        if format_id and format_id not in ['SD', 'HD', 'FullHD', '2K', '4K', 'low', 'medium', 'high']:
             response.update({
                 'format': download.format,
                 'format_info': {
@@ -132,10 +351,25 @@ def create_download():
                     'filesize_approx_mb': round(selected_format.get('filesize_approx', 0) / 1024 / 1024, 2) if selected_format.get('filesize_approx') else None
                 }
             })
+        elif format_id in ['low', 'medium', 'high']:
+            format_data = formats['audio_only'][format_id]
+            response.update({
+                'format': format_id,
+                'format_info': {
+                    'format': format_data['format'].get('format'),
+                    'ext': format_data['format'].get('ext'),
+                    'bitrate': format_data['bitrate'],
+                    'filesize': format_data['format'].get('filesize'),
+                    'filesize_mb': round(format_data['format'].get('filesize', 0) / 1024 / 1024, 2) if format_data['format'].get('filesize') else None,
+                    'filesize_approx': format_data['format'].get('filesize_approx'),
+                    'filesize_approx_mb': round(format_data['format'].get('filesize_approx', 0) / 1024 / 1024, 2) if format_data['format'].get('filesize_approx') else None
+                }
+            })
         else:
             response.update({
                 'video_format': download.video_format,
                 'audio_format': download.audio_format,
+                'quality': format_id if format_id in ['SD', 'HD', 'FullHD', '2K', '4K'] else None,
                 'format_info': {
                     'video': {
                         'format': video_format.get('format'),
@@ -190,6 +424,17 @@ def get_download_status(task_id):
                     for f in video_info:
                         if f.get('format_id') == download.format:
                             ext = f.get('ext', 'mp4')
+                            break
+                elif download.audio_format and not download.video_format:
+                    # Если это только аудио
+                    formats = get_cached_formats(download.url, filtered=True)
+                    for quality, data in formats.get('audio_only', {}).items():
+                        if data['format']['format_id'] == download.audio_format:
+                            # Если включена конвертация в MP3, используем mp3
+                            if 'mp3' in download.file_path.lower():
+                                ext = 'mp3'
+                            else:
+                                ext = data['format'].get('ext', 'mp3')
                             break
                 result['file_url'] = f"https://{host}/api/download/{task_id}.{ext}"
             
@@ -253,22 +498,31 @@ def download_file(task_id, ext=None):
                 logger.info(f"Using file from database: {actual_file}")
             else:
                 # Search in task directory
-                logger.info(f"Searching for video files in: {task_dir}")
-                video_files = []
-                for ext in ['.mp4', '.mkv', '.webm', '.m4a']:
+                logger.info(f"Searching for files in: {task_dir}")
+                media_files = []
+                
+                # Определяем список расширений для поиска
+                if download.audio_format and not download.video_format:
+                    # Если это только аудио
+                    extensions = ['.mp3', '.m4a', '.opus', '.webm', '.aac']
+                else:
+                    # Если это видео или комбинированный формат
+                    extensions = ['.mp4', '.mkv', '.webm', '.m4a']
+                
+                for ext in extensions:
                     pattern = os.path.join(task_dir, f'*{ext}')
                     found = glob.glob(pattern)
                     if found:
                         logger.debug(f"Found files matching {pattern}: {found}")
-                        video_files.extend(found)
+                        media_files.extend(found)
                 
-                if not video_files:
-                    logger.error(f"No video files found in {task_dir}")
-                    return jsonify({'error': 'Video file not found'}), 404
+                if not media_files:
+                    logger.error(f"No media files found in {task_dir}")
+                    return jsonify({'error': 'Media file not found'}), 404
                 
                 # Get most recent file
-                video_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                actual_file = video_files[0]
+                media_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                actual_file = media_files[0]
                 logger.info(f"Selected most recent file: {actual_file}")
                 
                 # Update database
@@ -334,3 +588,112 @@ def download_file(task_id, ext=None):
     except ValueError as e:
         logger.error(f"Invalid UUID format: {task_id}")
         return jsonify({'error': 'Invalid task ID format'}), 400
+
+@api_bp.route('/audio/formats', methods=['GET'])
+@require_api_key
+def get_audio_formats():
+    """Get available audio formats"""
+    url = request.args.get('url')
+    if not url:
+        return jsonify({'error': 'URL parameter is required'}), 400
+
+    try:
+        formats = get_cached_formats(url, filtered=False)
+        
+        # Filter audio-only formats
+        audio_formats = []
+        for f in formats:
+            if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+                audio_formats.append({
+                    'format_id': f.get('format_id'),
+                    'format': f.get('format'),
+                    'ext': f.get('ext'),
+                    'filesize': f.get('filesize'),
+                    'filesize_approx': f.get('filesize_approx'),
+                    'acodec': f.get('acodec'),
+                    'abr': f.get('abr'),
+                    'asr': f.get('asr'),
+                    'quality': 'low' if f.get('abr', 0) < 128 else ('high' if f.get('abr', 0) > 192 else 'medium')
+                })
+        
+        return jsonify(audio_formats)
+        
+    except Exception as e:
+        logger.error(f"Error getting audio formats: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/audio/download', methods=['GET'])
+@require_api_key
+def create_audio_download():
+    """Create audio download task"""
+    try:
+        url = request.args.get('url')
+        if not url:
+            return jsonify({'error': 'URL parameter is required'}), 400
+
+        format_id = request.args.get('format')
+        convert_to_mp3 = request.args.get('convert_to_mp3', 'false').lower() == 'true'
+        
+        # Get available formats
+        formats = get_cached_formats(url, filtered=True)
+        video_info = get_cached_formats(url, filtered=False)
+        
+        # Determine audio format ID based on quality
+        if format_id in ['low', 'medium', 'high']:
+            if format_id not in formats.get('audio_only', {}):
+                return jsonify({'error': f'Audio quality {format_id} is not available for this video'}), 400
+                
+            format_data = formats['audio_only'][format_id]
+            audio_format_id = format_data['format']['format_id']
+        else:
+            # Use provided format ID directly
+            audio_format_id = format_id
+            
+            # Verify format exists and is audio
+            audio_format = next((f for f in video_info if f.get('format_id') == audio_format_id and f.get('acodec') != 'none'), None)
+            if not audio_format:
+                return jsonify({'error': f'Invalid audio format ID: {audio_format_id}'}), 400
+        
+        # Create download task
+        task_id = UUID(bytes=os.urandom(16))
+        download = Download(
+            task_id=task_id,
+            url=url,
+            audio_format=audio_format_id
+        )
+        
+        db.session.add(download)
+        db.session.commit()
+        
+        # Start async download
+        start_download_task(
+            str(task_id),
+            url,
+            audio_format_id=audio_format_id,
+            audio_only=True,
+            convert_to_mp3=convert_to_mp3
+        )
+        
+        # Prepare response
+        response = {
+            'task_id': str(download.task_id),
+            'url': download.url,
+            'created_at': download.created_at.isoformat(),
+            'audio_only': True,
+            'convert_to_mp3': convert_to_mp3,
+            'format': format_id,
+            'format_info': {
+                'format': audio_format.get('format'),
+                'ext': audio_format.get('ext'),
+                'filesize': audio_format.get('filesize'),
+                'filesize_mb': round(audio_format.get('filesize', 0) / 1024 / 1024, 2) if audio_format.get('filesize') else None,
+                'filesize_approx': audio_format.get('filesize_approx'),
+                'filesize_approx_mb': round(audio_format.get('filesize_approx', 0) / 1024 / 1024, 2) if audio_format.get('filesize_approx') else None
+            }
+        }
+        
+        return jsonify(response), 202
+        
+    except Exception as e:
+        logger.error(f"Error creating audio download: {str(e)}")
+        return jsonify({'error': str(e)}), 500
