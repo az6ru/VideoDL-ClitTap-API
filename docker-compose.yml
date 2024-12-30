@@ -3,29 +3,29 @@ version: '3.8'
 services:
   web:
     build: .
-    ports:
-      - "8000:3000"
+    expose:
+      - "3000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${SECRET_KEY}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - FLASK_ENV=production
       - FLASK_APP=${FLASK_APP}
-      - FLASK_PORT=8000
+      - FLASK_PORT=3000
       - AUTH_USERNAME=${AUTH_USERNAME}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - CLEANUP_RETENTION_HOURS=${CLEANUP_RETENTION_HOURS}
       - DEFAULT_RATE_LIMIT=${DEFAULT_RATE_LIMIT}
       - TOKEN_EXPIRY_DAYS=${TOKEN_EXPIRY_DAYS}
-      - SERVICE_FQDN_WEB_8000
-      - GUNICORN_CMD_ARGS="--bind=0.0.0.0:8000 --workers=${WORKERS} --timeout=${TIMEOUT}"
+      - SERVICE_FQDN_WEB_3000
+      - GUNICORN_CMD_ARGS="--bind=0.0.0.0:3000 --workers=${WORKERS} --timeout=${TIMEOUT}"
     volumes:
       - ./downloads:/app/downloads
     depends_on:
       - db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
