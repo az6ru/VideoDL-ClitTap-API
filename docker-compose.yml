@@ -3,10 +3,14 @@ version: '3.8'
 services:
   web:
     build: .
+    expose:
+      - "8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${SECRET_KEY}
       - FLASK_ENV=production
+      - PORT=8000
+      - GUNICORN_CMD_ARGS="--bind=0.0.0.0:8000 --workers=4 --timeout=120"
     volumes:
       - ./downloads:/app/downloads
     depends_on:
