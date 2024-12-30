@@ -9,6 +9,7 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from config import Config
 from utils.downloader import start_cleanup_thread
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +18,10 @@ logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# Настройка для работы за прокси
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 CORS(app)
 
 # Configuration
