@@ -34,14 +34,14 @@ RUN chmod +x /entrypoint.sh
 # Устанавливаем переменные окружения
 ENV FLASK_ENV=production
 ENV FLASK_APP=app
-ENV FLASK_PORT=3000
+ENV PORT=3333
 ENV SOURCE_DATE_EPOCH=315532800
 
 # Открываем порт
-EXPOSE 3000
+EXPOSE ${PORT}
 
 # Устанавливаем entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
 
 # Команда запуска приложения через Gunicorn
-CMD ["gunicorn", "main:app", "--bind", "0.0.0.0:3000", "--workers", "4", "--timeout", "120", "--keep-alive", "5", "--log-level", "info"]
+CMD gunicorn main:app --bind 0.0.0.0:${PORT} --workers 4 --timeout 120 --keep-alive 5 --log-level info
