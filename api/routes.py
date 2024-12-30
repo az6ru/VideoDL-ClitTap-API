@@ -251,6 +251,7 @@ def create_download():
                     
                 format_data = formats['audio_only'][format_id]
                 audio_format_id = format_data['format']['format_id']
+                audio_format = format_data['format']
                 
                 task_id = UUID(bytes=os.urandom(16))
                 download = Download(
@@ -592,7 +593,60 @@ def download_file(task_id, ext=None):
 @api_bp.route('/audio/formats', methods=['GET'])
 @require_api_key
 def get_audio_formats():
-    """Get available audio formats"""
+    """
+    Получение доступных аудио форматов
+    ---
+    tags:
+      - audio
+    parameters:
+      - name: url
+        in: query
+        type: string
+        required: true
+        description: URL видео для получения форматов
+    responses:
+      200:
+        description: Список доступных аудио форматов
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              format_id:
+                type: string
+                description: ID формата
+              format:
+                type: string
+                description: Описание формата
+              ext:
+                type: string
+                description: Расширение файла
+              filesize:
+                type: integer
+                description: Размер файла в байтах
+              filesize_approx:
+                type: integer
+                description: Приблизительный размер файла в байтах
+              acodec:
+                type: string
+                description: Аудио кодек
+              abr:
+                type: number
+                description: Битрейт аудио (kbps)
+              asr:
+                type: integer
+                description: Частота дискретизации (Hz)
+              quality:
+                type: string
+                enum: [low, medium, high]
+                description: Качество аудио
+      400:
+        description: Ошибка в параметрах запроса
+      401:
+        description: Отсутствует или неверный API ключ
+      500:
+        description: Внутренняя ошибка сервера
+    """
     url = request.args.get('url')
     if not url:
         return jsonify({'error': 'URL parameter is required'}), 400
@@ -625,7 +679,62 @@ def get_audio_formats():
 @api_bp.route('/audio/download', methods=['GET'])
 @require_api_key
 def create_audio_download():
-    """Create audio download task"""
+    """
+    Создание задачи на скачивание аудио
+    ---
+    tags:
+      - audio
+    parameters:
+      - name: url
+        in: query
+        type: string
+        required: true
+        description: URL видео для скачивания
+      - name: format
+        in: query
+        type: string
+        required: true
+        description: Качество аудио (low, medium, high) или ID конкретного формата
+      - name: convert_to_mp3
+        in: query
+        type: boolean
+        default: false
+        description: Конвертировать ли аудио в MP3 формат
+    responses:
+      202:
+        description: Задача на скачивание создана успешно
+        schema:
+          type: object
+          properties:
+            task_id:
+              type: string
+              description: Уникальный идентификатор задачи
+            url:
+              type: string
+              description: URL видео
+            created_at:
+              type: string
+              format: date-time
+              description: Время создания задачи
+            audio_only:
+              type: boolean
+              description: Всегда true для аудио скачивания
+            convert_to_mp3:
+              type: boolean
+              description: Выбрана ли конвертация в MP3
+            format:
+              type: string
+              description: Выбранное качество или ID формата
+            format_info:
+              type: object
+              description: Информация о выбранном формате
+      400:
+        description: Ошибка в параметрах запроса
+      401:
+        description: Отсутствует или неверный API ключ
+      500:
+        description: Внутренняя ошибка сервера
+    """
     try:
         url = request.args.get('url')
         if not url:
@@ -645,6 +754,7 @@ def create_audio_download():
                 
             format_data = formats['audio_only'][format_id]
             audio_format_id = format_data['format']['format_id']
+            audio_format = format_data['format']
         else:
             # Use provided format ID directly
             audio_format_id = format_id
