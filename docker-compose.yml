@@ -8,9 +8,17 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${SECRET_KEY}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - FLASK_ENV=production
-      - PORT=8000
-      - GUNICORN_CMD_ARGS="--bind=0.0.0.0:8000 --workers=4 --timeout=120"
+      - FLASK_APP=${FLASK_APP}
+      - FLASK_PORT=8000
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - CLEANUP_RETENTION_HOURS=${CLEANUP_RETENTION_HOURS}
+      - DEFAULT_RATE_LIMIT=${DEFAULT_RATE_LIMIT}
+      - TOKEN_EXPIRY_DAYS=${TOKEN_EXPIRY_DAYS}
+      - SERVICE_FQDN_WEB_8000
+      - GUNICORN_CMD_ARGS="--bind=0.0.0.0:8000 --workers=${WORKERS} --timeout=${TIMEOUT}"
     volumes:
       - ./downloads:/app/downloads
     depends_on:
