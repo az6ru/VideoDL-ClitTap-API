@@ -607,6 +607,184 @@
           }
         }
       }
+    },
+    "/audio/formats": {
+      "get": {
+        "tags": ["audio"],
+        "summary": "Получение доступных аудио форматов",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL видео для получения форматов"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Список доступных аудио форматов",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "format_id": {
+                        "type": "string",
+                        "description": "ID формата"
+                      },
+                      "format": {
+                        "type": "string",
+                        "description": "Описание формата"
+                      },
+                      "ext": {
+                        "type": "string",
+                        "description": "Расширение файла"
+                      },
+                      "filesize": {
+                        "type": "integer",
+                        "description": "Размер файла в байтах"
+                      },
+                      "filesize_approx": {
+                        "type": "integer",
+                        "description": "Приблизительный размер файла в байтах"
+                      },
+                      "acodec": {
+                        "type": "string",
+                        "description": "Аудио кодек"
+                      },
+                      "abr": {
+                        "type": "number",
+                        "description": "Битрейт аудио (kbps)"
+                      },
+                      "asr": {
+                        "type": "integer",
+                        "description": "Частота дискретизации (Hz)"
+                      },
+                      "quality": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                        "description": "Качество аудио"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка в параметрах запроса"
+          },
+          "401": {
+            "description": "Отсутствует или неверный API ключ"
+          },
+          "500": {
+            "description": "Внутренняя ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/audio/download": {
+      "get": {
+        "tags": ["audio"],
+        "summary": "Создание задачи на скачивание аудио",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL видео для скачивания"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Качество аудио (low, medium, high) или ID конкретного формата"
+          },
+          {
+            "name": "convert_to_mp3",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Конвертировать ли аудио в MP3 формат"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Задача на скачивание создана успешно",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task_id": {
+                      "type": "string",
+                      "description": "Уникальный идентификатор задачи"
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "URL видео"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Время создания задачи"
+                    },
+                    "audio_only": {
+                      "type": "boolean",
+                      "description": "Всегда true для аудио скачивания"
+                    },
+                    "convert_to_mp3": {
+                      "type": "boolean",
+                      "description": "Выбрана ли конвертация в MP3"
+                    },
+                    "format": {
+                      "type": "string",
+                      "description": "Выбранное качество или ID формата"
+                    },
+                    "format_info": {
+                      "type": "object",
+                      "description": "Информация о выбранном формате"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка в параметрах запроса"
+          },
+          "401": {
+            "description": "Отсутствует или неверный API ключ"
+          },
+          "500": {
+            "description": "Внутренняя ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
     }
   },
   "security": [

@@ -749,7 +749,10 @@ def create_audio_download():
         
         # Determine audio format ID based on quality
         if format_id in ['low', 'medium', 'high']:
-            if format_id not in formats.get('audio_only', {}):
+            if 'audio_only' not in formats:
+                return jsonify({'error': 'No audio formats available for this video'}), 400
+                
+            if format_id not in formats['audio_only']:
                 return jsonify({'error': f'Audio quality {format_id} is not available for this video'}), 400
                 
             format_data = formats['audio_only'][format_id]
