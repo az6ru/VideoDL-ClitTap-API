@@ -13,6 +13,7 @@ from utils.downloader import get_cached_video_info, get_cached_formats, start_do
 from api.middleware import require_api_key
 import logging
 from functools import wraps
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +258,9 @@ def create_download():
                 download = Download(
                     task_id=task_id,
                     url=url,
-                    audio_format=audio_format_id
+                    audio_format=audio_format_id,
+                    audio_only=True,
+                    convert_to_mp3=convert_to_mp3
                 )
             else:
                 # Проверяем существование одиночного формата по ID
@@ -417,27 +420,42 @@ def get_download_status(task_id):
             
             # Add direct file URL with extension if download is completed
             if download.status == 'completed':
-                # Get file extension based on format
-                ext = 'mp4'  # default extension
-                if download.format:
-                    # Get format info from video info
-                    video_info = get_cached_formats(download.url)
-                    for f in video_info:
-                        if f.get('format_id') == download.format:
-                            ext = f.get('ext', 'mp4')
-                            break
-                elif download.audio_format and not download.video_format:
-                    # Если это только аудио
-                    formats = get_cached_formats(download.url, filtered=True)
-                    for quality, data in formats.get('audio_only', {}).items():
-                        if data['format']['format_id'] == download.audio_format:
-                            # Если включена конвертация в MP3, используем mp3
-                            if 'mp3' in download.file_path.lower():
-                                ext = 'mp3'
-                            else:
-                                ext = data['format'].get('ext', 'mp3')
-                            break
-                result['file_url'] = f"https://{host}/api/download/{task_id}.{ext}"
+                # Формируем имя файла
+                title = download.title or os.path.splitext(os.path.basename(download.file_path))[0]
+                safe_title = get_safe_filename(title)
+                
+                # Добавляем информацию о качестве для аудио
+                if download.audio_format and not download.video_format:
+                    quality = 'high' if download.audio_format.endswith('-high') else \
+                             'medium' if download.audio_format.endswith('-medium') else 'low'
+                    safe_title = f"{safe_title}_{quality}"
+                
+                # Определяем расширение
+                if download.convert_to_mp3:
+                    ext = 'mp3'
+                elif download.file_path:
+                    ext = os.path.splitext(download.file_path)[1].lstrip('.')
+                else:
+                    ext = 'mp3' if getattr(download, 'convert_to_mp3', False) else 'mp4'
+                    if download.format:
+                        # Get format info from video info
+                        video_info = get_cached_formats(download.url)
+                        for f in video_info:
+                            if f.get('format_id') == download.format:
+                                ext = f.get('ext', ext)
+                                break
+                    elif download.audio_format and not download.video_format:
+                        # Если это только аудио
+                        formats = get_cached_formats(download.url, filtered=True)
+                        for quality, data in formats.get('audio_only', {}).items():
+                            if data['format']['format_id'] == download.audio_format:
+                                if getattr(download, 'convert_to_mp3', False):
+                                    ext = 'mp3'
+                                else:
+                                    ext = data['format'].get('ext', ext)
+                                break
+                
+                result['file_url'] = f"https://{host}/api/download/{task_id}/{safe_title}.{ext}"
             
             # Remove file_path from response since it's internal
             result.pop('file_path', None)
@@ -446,13 +464,28 @@ def get_download_status(task_id):
         logger.error(f"Invalid UUID format: {task_id}")
         return jsonify({'error': 'Invalid task ID format'}), 400
 
+def get_safe_filename(s):
+    """
+    Преобразует строку в безопасное имя файла.
+    Удаляет или заменяет недопустимые символы.
+    """
+    # Заменяем пробелы на подчеркивания
+    s = s.replace(' ', '_')
+    # Удаляем или заменяем специальные символы
+    s = re.sub(r'[^\w\-\.]', '', s)
+    # Транслитерация русских букв
+    s = s.encode('ascii', 'ignore').decode()
+    return s
+
 @api_bp.route('/download/<task_id>/file', methods=['GET'])
 @api_bp.route('/download/<task_id>.<ext>', methods=['GET'])
-def download_file(task_id, ext=None):
+@api_bp.route('/download/<task_id>/<filename>', methods=['GET'])
+def download_file(task_id, ext=None, filename=None):
     """Download the completed file
-    Supports two URL formats:
+    Supports three URL formats:
     - /api/download/{task_id}/file
     - /api/download/{task_id}.{ext}
+    - /api/download/{task_id}/{filename}
     """
     logger.info(f"Download request received - task_id: {task_id}, ext: {ext}")
     
@@ -570,12 +603,30 @@ def download_file(task_id, ext=None):
                     logger.error(f"Failed to set file permissions: {e}")
                     return jsonify({'error': 'File not accessible'}), 403
             
+            # Формируем имя файла для скачивания
+            title = download.title or os.path.splitext(os.path.basename(actual_file))[0]
+            safe_title = get_safe_filename(title)
+            
+            # Добавляем информацию о качестве для аудио
+            if download.audio_format and not download.video_format:
+                quality = 'high' if download.audio_format.endswith('-high') else \
+                         'medium' if download.audio_format.endswith('-medium') else 'low'
+                safe_title = f"{safe_title}_{quality}"
+            
+            # Определяем расширение
+            if download.convert_to_mp3:
+                ext = 'mp3'
+            else:
+                ext = os.path.splitext(actual_file)[1].lstrip('.')
+            
+            download_name = f"{safe_title}.{ext}"
+            
             # Serve the file
-            logger.info(f"Serving file: {actual_file} ({file_stat.st_size} bytes)")
+            logger.info(f"Serving file: {actual_file} ({file_stat.st_size} bytes) as {download_name}")
             return send_file(
                 actual_file,
                 as_attachment=True,
-                download_name=os.path.basename(actual_file)
+                download_name=download_name
             )
             
         except OSError as e:
@@ -589,6 +640,28 @@ def download_file(task_id, ext=None):
     except ValueError as e:
         logger.error(f"Invalid UUID format: {task_id}")
         return jsonify({'error': 'Invalid task ID format'}), 400
+
+def determine_audio_quality(format_info):
+    """Определяет качество аудио на основе характеристик"""
+    abr = format_info.get('abr', 0)
+    asr = format_info.get('asr', 0)
+    
+    if abr >= 256 or asr >= 48000:
+        return 'high'
+    elif abr >= 128 or asr >= 44100:
+        return 'medium'
+    else:
+        return 'low'
+
+def format_size(size):
+    """Форматирует размер файла в человекочитаемый вид"""
+    if not size:
+        return None
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} TB"
 
 @api_bp.route('/audio/formats', methods=['GET'])
 @require_api_key
@@ -604,50 +677,40 @@ def get_audio_formats():
         type: string
         required: true
         description: URL видео для получения форматов
+      - name: grouped
+        in: query
+        type: boolean
+        required: false
+        default: false
+        description: Группировать форматы по качеству
     responses:
       200:
         description: Список доступных аудио форматов
-        schema:
-          type: array
-          items:
-            type: object
-            properties:
-              format_id:
-                type: string
-                description: ID формата
-              format:
-                type: string
-                description: Описание формата
-              ext:
-                type: string
-                description: Расширение файла
-              filesize:
-                type: integer
-                description: Размер файла в байтах
-              filesize_approx:
-                type: integer
-                description: Приблизительный размер файла в байтах
-              acodec:
-                type: string
-                description: Аудио кодек
-              abr:
-                type: number
-                description: Битрейт аудио (kbps)
-              asr:
-                type: integer
-                description: Частота дискретизации (Hz)
-              quality:
-                type: string
-                enum: [low, medium, high]
-                description: Качество аудио
-      400:
-        description: Ошибка в параметрах запроса
-      401:
-        description: Отсутствует или неверный API ключ
-      500:
-        description: Внутренняя ошибка сервера
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/AudioFormat'
+                - type: object
+                  properties:
+                    low:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/AudioFormat'
+                    medium:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/AudioFormat'
+                    high:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/AudioFormat'
     """
     url = request.args.get('url')
+    grouped = request.args.get('grouped', 'false').lower() == 'true'
+    
     if not url:
         return jsonify({'error': 'URL parameter is required'}), 400
 
@@ -658,23 +721,184 @@ def get_audio_formats():
         audio_formats = []
         for f in formats:
             if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
-                audio_formats.append({
+                format_info = {
                     'format_id': f.get('format_id'),
                     'format': f.get('format'),
                     'ext': f.get('ext'),
                     'filesize': f.get('filesize'),
                     'filesize_approx': f.get('filesize_approx'),
+                    'filesize_formatted': format_size(f.get('filesize')),
+                    'filesize_approx_formatted': format_size(f.get('filesize_approx')),
                     'acodec': f.get('acodec'),
                     'abr': f.get('abr'),
-                    'asr': f.get('asr'),
-                    'quality': 'low' if f.get('abr', 0) < 128 else ('high' if f.get('abr', 0) > 192 else 'medium')
-                })
+                    'asr': f.get('asr')
+                }
+                format_info['quality'] = determine_audio_quality(f)
+                audio_formats.append(format_info)
         
-        return jsonify(audio_formats)
+        if not grouped:
+            return jsonify(audio_formats)
+        
+        # Group formats by quality
+        grouped_formats = {
+            'low': [],
+            'medium': [],
+            'high': []
+        }
+        
+        for format_info in audio_formats:
+            quality = format_info['quality']
+            grouped_formats[quality].append(format_info)
+        
+        # Для каждого качества выбираем лучший формат
+        best_formats = {}
+        for quality in ['low', 'medium', 'high']:
+            formats_group = grouped_formats[quality]
+            if formats_group:
+                # Сортируем по битрейту и размеру файла
+                best_format = max(formats_group, 
+                    key=lambda x: (x.get('abr', 0) or 0, x.get('filesize', 0) or 0))
+                best_formats[quality] = best_format
+        
+        return jsonify(best_formats)
         
     except Exception as e:
         logger.error(f"Error getting audio formats: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+def get_best_audio_format(formats, quality='medium', preferred_codec=None, max_filesize=None):
+    """
+    Определяет лучший аудио формат на основе параметров
+    
+    Args:
+        formats: Список доступных форматов
+        quality: Желаемое качество (low, medium, high)
+        preferred_codec: Предпочтительный кодек (mp3, aac, opus)
+        max_filesize: Максимальный размер файла в байтах
+    """
+    audio_formats = []
+    
+    # Фильтруем только аудио форматы
+    for f in formats:
+        if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+            f['quality'] = determine_audio_quality(f)
+            audio_formats.append(f)
+    
+    if not audio_formats:
+        return None
+        
+    # Фильтруем по качеству
+    quality_formats = [f for f in audio_formats if f['quality'] == quality]
+    if not quality_formats:
+        # Если нет форматов нужного качества, берем ближайшие
+        if quality == 'high':
+            quality_formats = [f for f in audio_formats if f['quality'] == 'medium']
+        elif quality == 'low':
+            quality_formats = [f for f in audio_formats if f['quality'] == 'medium']
+        
+        if not quality_formats:
+            quality_formats = audio_formats
+    
+    # Фильтруем по размеру файла
+    if max_filesize:
+        size_formats = [f for f in quality_formats 
+                       if f.get('filesize', float('inf')) <= max_filesize or 
+                          f.get('filesize_approx', float('inf')) <= max_filesize]
+        if size_formats:
+            quality_formats = size_formats
+    
+    # Фильтруем по кодеку
+    if preferred_codec:
+        codec_formats = [f for f in quality_formats 
+                        if f.get('acodec', '').lower().startswith(preferred_codec.lower())]
+        if codec_formats:
+            quality_formats = codec_formats
+    
+    # Выбираем лучший формат
+    # Сортируем по: битрейту, частоте дискретизации и размеру файла
+    best_format = max(quality_formats, 
+        key=lambda x: (
+            x.get('abr', 0) or 0,
+            x.get('asr', 0) or 0,
+            x.get('filesize', 0) or x.get('filesize_approx', 0) or 0
+        )
+    )
+    
+    return best_format
+
+def get_optimal_audio_format(formats, quality_preference='medium', max_size_mb=None):
+    """
+    Определяет оптимальный аудио формат на основе параметров и эвристик
+    
+    Args:
+        formats: Список доступных форматов
+        quality_preference: Предпочтительное качество (low, medium, high)
+        max_size_mb: Максимальный размер в МБ
+    """
+    # Фильтруем только аудио форматы
+    audio_formats = []
+    for f in formats:
+        if f.get('acodec') != 'none' and f.get('vcodec') == 'none' and f.get('format_id'):
+            # Определяем качество
+            abr = f.get('abr', 0) or 0
+            asr = f.get('asr', 0) or 0
+            filesize = f.get('filesize', 0) or f.get('filesize_approx', 0) or 0
+            
+            # Оценка качества по битрейту
+            if abr >= 256 or asr >= 48000:
+                quality = 'high'
+            elif abr >= 128 or asr >= 44100:
+                quality = 'medium'
+            else:
+                quality = 'low'
+                
+            # Оценка формата
+            score = 0
+            
+            # Базовая оценка по качеству
+            if quality == quality_preference:
+                score += 100
+            elif (quality == 'medium' and quality_preference == 'high') or \
+                 (quality == 'medium' and quality_preference == 'low'):
+                score += 50
+            elif quality == 'high' and quality_preference == 'low':
+                score -= 50
+            elif quality == 'low' and quality_preference == 'high':
+                score -= 50
+                
+            # Бонус за популярные кодеки
+            acodec = f.get('acodec', '')
+            if acodec and isinstance(acodec, str):
+                if acodec.startswith('mp4a'):  # AAC
+                    score += 20
+                elif acodec.startswith('opus'):
+                    score += 15
+                
+            # Штраф за большой размер файла
+            if max_size_mb and filesize > max_size_mb * 1024 * 1024:
+                score -= 1000
+            
+            # Бонус за наличие точного размера файла
+            if f.get('filesize'):
+                score += 10
+                
+            # Бонус за более высокий битрейт (в пределах разумного)
+            if abr > 0:
+                score += min(abr / 32, 30)  # Максимум 30 баллов за битрейт
+                
+            # Бонус за более высокую частоту дискретизации
+            if asr > 0:
+                score += min(asr / 8000, 20)  # Максимум 20 баллов за частоту
+            
+            f['score'] = score
+            audio_formats.append(f)
+    
+    if not audio_formats:
+        return None
+        
+    # Выбираем формат с наивысшей оценкой
+    best_format = max(audio_formats, key=lambda x: x['score'])
+    return best_format['format_id']
 
 @api_bp.route('/audio/download', methods=['GET'])
 @require_api_key
@@ -693,41 +917,36 @@ def create_audio_download():
       - name: format
         in: query
         type: string
-        required: true
-        description: Качество аудио (low, medium, high) или ID конкретного формата
+        required: false
+        description: ID формата или качество (low, medium, high)
       - name: convert_to_mp3
         in: query
         type: boolean
+        required: false
         default: false
-        description: Конвертировать ли аудио в MP3 формат
+        description: Конвертировать в MP3
     responses:
       202:
-        description: Задача на скачивание создана успешно
-        schema:
-          type: object
-          properties:
-            task_id:
-              type: string
-              description: Уникальный идентификатор задачи
-            url:
-              type: string
-              description: URL видео
-            created_at:
-              type: string
-              format: date-time
-              description: Время создания задачи
-            audio_only:
-              type: boolean
-              description: Всегда true для аудио скачивания
-            convert_to_mp3:
-              type: boolean
-              description: Выбрана ли конвертация в MP3
-            format:
-              type: string
-              description: Выбранное качество или ID формата
-            format_info:
+        description: Задача создана
+        content:
+          application/json:
+            schema:
               type: object
-              description: Информация о выбранном формате
+              properties:
+                task_id:
+                  type: string
+                  format: uuid
+                url:
+                  type: string
+                created_at:
+                  type: string
+                  format: date-time
+                format:
+                  type: string
+                convert_to_mp3:
+                  type: boolean
+                format_info:
+                  type: object
       400:
         description: Ошибка в параметрах запроса
       401:
@@ -739,46 +958,51 @@ def create_audio_download():
         url = request.args.get('url')
         if not url:
             return jsonify({'error': 'URL parameter is required'}), 400
-
+            
         format_id = request.args.get('format')
         convert_to_mp3 = request.args.get('convert_to_mp3', 'false').lower() == 'true'
         
-        # Get available formats
-        formats = get_cached_formats(url, filtered=True)
-        video_info = get_cached_formats(url, filtered=False)
+        # Получаем информацию о форматах
+        formats = get_cached_formats(url, filtered=False)
         
-        # Determine audio format ID based on quality
+        # Если формат не указан, используем medium качество
+        if not format_id:
+            format_id = 'medium'
+            
+        # Определяем формат
         if format_id in ['low', 'medium', 'high']:
-            if 'audio_only' not in formats:
-                return jsonify({'error': 'No audio formats available for this video'}), 400
+            # Выбираем лучший формат для указанного качества
+            audio_format_id = get_optimal_audio_format(formats, quality_preference=format_id)
+            if not audio_format_id:
+                return jsonify({'error': f'No audio formats available for quality {format_id}'}), 400
                 
-            if format_id not in formats['audio_only']:
-                return jsonify({'error': f'Audio quality {format_id} is not available for this video'}), 400
-                
-            format_data = formats['audio_only'][format_id]
-            audio_format_id = format_data['format']['format_id']
-            audio_format = format_data['format']
+            # Получаем информацию о выбранном формате
+            audio_format = next((f for f in formats if f.get('format_id') == audio_format_id), None)
+            if not audio_format:
+                return jsonify({'error': f'Format {audio_format_id} not found'}), 400
         else:
-            # Use provided format ID directly
+            # Используем указанный format_id
+            audio_format = next((f for f in formats 
+                               if f.get('format_id') == format_id 
+                               and f.get('acodec') != 'none' 
+                               and f.get('vcodec') == 'none'), None)
+            if not audio_format:
+                return jsonify({'error': f'Invalid audio format ID: {format_id}'}), 400
             audio_format_id = format_id
             
-            # Verify format exists and is audio
-            audio_format = next((f for f in video_info if f.get('format_id') == audio_format_id and f.get('acodec') != 'none'), None)
-            if not audio_format:
-                return jsonify({'error': f'Invalid audio format ID: {audio_format_id}'}), 400
-        
-        # Create download task
+        # Создаем задачу
         task_id = UUID(bytes=os.urandom(16))
         download = Download(
             task_id=task_id,
             url=url,
-            audio_format=audio_format_id
+            audio_format=audio_format_id,
+            convert_to_mp3=convert_to_mp3
         )
         
         db.session.add(download)
         db.session.commit()
         
-        # Start async download
+        # Запускаем скачивание
         start_download_task(
             str(task_id),
             url,
@@ -787,21 +1011,24 @@ def create_audio_download():
             convert_to_mp3=convert_to_mp3
         )
         
-        # Prepare response
+        # Готовим ответ
         response = {
-            'task_id': str(download.task_id),
-            'url': download.url,
+            'task_id': str(task_id),
+            'url': url,
             'created_at': download.created_at.isoformat(),
-            'audio_only': True,
+            'format': audio_format_id,
             'convert_to_mp3': convert_to_mp3,
-            'format': format_id,
             'format_info': {
                 'format': audio_format.get('format'),
                 'ext': audio_format.get('ext'),
                 'filesize': audio_format.get('filesize'),
                 'filesize_mb': round(audio_format.get('filesize', 0) / 1024 / 1024, 2) if audio_format.get('filesize') else None,
                 'filesize_approx': audio_format.get('filesize_approx'),
-                'filesize_approx_mb': round(audio_format.get('filesize_approx', 0) / 1024 / 1024, 2) if audio_format.get('filesize_approx') else None
+                'filesize_approx_mb': round(audio_format.get('filesize_approx', 0) / 1024 / 1024, 2) if audio_format.get('filesize_approx') else None,
+                'quality': determine_audio_quality(audio_format),
+                'acodec': audio_format.get('acodec'),
+                'abr': audio_format.get('abr'),
+                'asr': audio_format.get('asr')
             }
         }
         

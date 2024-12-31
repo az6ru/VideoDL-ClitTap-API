@@ -1,12 +1,14 @@
 from datetime import datetime
 from uuid import UUID
 from extensions import db
+import uuid
+from sqlalchemy.dialects.postgresql import UUID as pgUUID
 
 class Download(db.Model):
     __tablename__ = 'downloads'
 
     id = db.Column(db.Integer, primary_key=True)
-    task_id = db.Column(db.UUID, unique=True, nullable=False)
+    task_id = db.Column(pgUUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4)
     url = db.Column(db.String, nullable=False)
     format = db.Column(db.String)
     video_format = db.Column(db.String)
@@ -18,6 +20,8 @@ class Download(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = db.Column(db.DateTime)
+    title = db.Column(db.String)
+    convert_to_mp3 = db.Column(db.Boolean, default=False)
 
 class ApiKey(db.Model):
     __tablename__ = 'api_keys'
