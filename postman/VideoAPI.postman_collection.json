@@ -1,0 +1,296 @@
+{
+  "info": {
+    "name": "Video API",
+    "description": "API для получения информации о видео и скачивания",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Create API Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{auth_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{auth_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/token",
+              "host": ["{{base_url}}"],
+              "path": ["token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Test Token\"\n}"
+            },
+            "description": "Создание нового API токена с базовой аутентификацией"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Video Info",
+      "item": [
+        {
+          "name": "Get Combined Info",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/combined-info?url={{video_url}}",
+              "host": ["{{base_url}}"],
+              "path": ["combined-info"],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "{{video_url}}"
+                }
+              ]
+            },
+            "description": "Получение полной информации о видео, включая все форматы"
+          }
+        },
+        {
+          "name": "Get Basic Info",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/info?url={{video_url}}",
+              "host": ["{{base_url}}"],
+              "path": ["info"],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "{{video_url}}"
+                }
+              ]
+            },
+            "description": "Получение базовой информации о видео"
+          }
+        },
+        {
+          "name": "Get Formats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/formats?url={{video_url}}&filtered=true",
+              "host": ["{{base_url}}"],
+              "path": ["formats"],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "{{video_url}}"
+                },
+                {
+                  "key": "filtered",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Получение списка доступных форматов видео"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Downloads",
+      "item": [
+        {
+          "name": "Create Download Task",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/download?url={{video_url}}&format=HD",
+              "host": ["{{base_url}}"],
+              "path": ["download"],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "{{video_url}}"
+                },
+                {
+                  "key": "format",
+                  "value": "HD"
+                }
+              ]
+            },
+            "description": "Создание задачи на скачивание видео"
+          }
+        },
+        {
+          "name": "Get Download Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/download/{{task_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["download", "{{task_id}}"]
+            },
+            "description": "Получение статуса задачи скачивания"
+          }
+        },
+        {
+          "name": "Download File",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/download/{{task_id}}/file",
+              "host": ["{{base_url}}"],
+              "path": ["download", "{{task_id}}", "file"]
+            },
+            "description": "Скачивание готового файла"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audio",
+      "item": [
+        {
+          "name": "Get Audio Formats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/audio/formats?url={{video_url}}",
+              "host": ["{{base_url}}"],
+              "path": ["audio", "formats"],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "{{video_url}}"
+                }
+              ]
+            },
+            "description": "Получение списка доступных аудио форматов"
+          }
+        },
+        {
+          "name": "Create Audio Download",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/audio/download?url={{video_url}}&format=high&convert_to_mp3=true",
+              "host": ["{{base_url}}"],
+              "path": ["audio", "download"],
+              "query": [
+                {
+                  "key": "url",
+                  "value": "{{video_url}}"
+                },
+                {
+                  "key": "format",
+                  "value": "high"
+                },
+                {
+                  "key": "convert_to_mp3",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Создание задачи на скачивание аудио"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5001/api"
+    },
+    {
+      "key": "api_key",
+      "value": "your_api_key_here"
+    },
+    {
+      "key": "video_url",
+      "value": "https://www.youtube.com/watch?v=example"
+    },
+    {
+      "key": "task_id",
+      "value": "your_task_id_here"
+    },
+    {
+      "key": "auth_username",
+      "value": "admin"
+    },
+    {
+      "key": "auth_password",
+      "value": "your_secure_password_here"
+    }
+  ]
+} 
