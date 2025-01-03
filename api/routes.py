@@ -8,16 +8,26 @@ from flask import Blueprint, request, jsonify, send_file
 from marshmallow import ValidationError
 from extensions import db
 from models import Download, ApiKey
-from api.schemas import VideoInfoSchema, DownloadSchema
+from api.schemas import VideoInfoSchema, DownloadSchema, CombinedVideoInfoSchema
 from utils.downloader import get_cached_video_info, get_cached_formats, start_download_task
 from api.middleware import require_api_key
 import logging
 from functools import wraps
 import re
+from transliterate import translit
+import json
 
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
+
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, UUID):
+            return str(obj)
+        return super().default(obj)
 
 def generate_api_key():
     """Генерация случайного API ключа"""
@@ -420,9 +430,8 @@ def get_download_status(task_id):
             
             # Add direct file URL with extension if download is completed
             if download.status == 'completed':
-                # Формируем имя файла
-                title = download.title or os.path.splitext(os.path.basename(download.file_path))[0]
-                safe_title = get_safe_filename(title)
+                # Формируем имя файла для скачивания, но не для отображения
+                safe_title = get_safe_filename(download.title or os.path.splitext(os.path.basename(download.file_path))[0])
                 
                 # Добавляем информацию о качестве для аудио
                 if download.audio_format and not download.video_format:
@@ -459,7 +468,10 @@ def get_download_status(task_id):
             
             # Remove file_path from response since it's internal
             result.pop('file_path', None)
-        return jsonify(result)
+
+        response = jsonify(result)
+        response.ensure_ascii = False
+        return response
     except ValueError as e:
         logger.error(f"Invalid UUID format: {task_id}")
         return jsonify({'error': 'Invalid task ID format'}), 400
@@ -467,14 +479,40 @@ def get_download_status(task_id):
 def get_safe_filename(s):
     """
     Преобразует строку в безопасное имя файла.
-    Удаляет или заменяет недопустимые символы.
+    Транслитерирует русские буквы в латиницу и заменяет недопустимые символы.
     """
+    # Транслитерация русских букв в латиницу
+    try:
+        s = translit(s, language_code='ru', reversed=True, strict=False)
+    except:
+        # Если транслитерация не удалась, используем базовую замену
+        replacements = {
+            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+            'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+            'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+            'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+            'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+            'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'Yo',
+            'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
+            'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
+            'Ф': 'F', 'Х': 'H', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Sch',
+            'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya'
+        }
+        for cyr, lat in replacements.items():
+            s = s.replace(cyr, lat)
+    
     # Заменяем пробелы на подчеркивания
     s = s.replace(' ', '_')
-    # Удаляем или заменяем специальные символы
-    s = re.sub(r'[^\w\-\.]', '', s)
-    # Транслитерация русских букв
-    s = s.encode('ascii', 'ignore').decode()
+    
+    # Заменяем специальные символы на подчеркивание
+    s = re.sub(r'[^\w\-\.]', '_', s)
+    
+    # Убираем множественные подчеркивания
+    s = re.sub(r'_+', '_', s)
+    
+    # Убираем подчеркивания в начале и конце
+    s = s.strip('_')
+    
     return s
 
 @api_bp.route('/download/<task_id>/file', methods=['GET'])
@@ -1037,3 +1075,51 @@ def create_audio_download():
     except Exception as e:
         logger.error(f"Error creating audio download: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/combined-info', methods=['GET'])
+@require_api_key
+def get_combined_info():
+    """Get complete video information including video and audio formats"""
+    url = request.args.get('url')
+    if not url:
+        return jsonify({'error': 'URL parameter is required'}), 400
+
+    try:
+        # Получаем базовую информацию о видео
+        video_info = get_cached_video_info(url)
+        
+        # Получаем форматы
+        formats = get_cached_formats(url, filtered=True)
+        
+        # Подготавливаем видео форматы
+        video_formats = []
+        for quality, format_data in formats.get('formats', {}).items():
+            if 'video' in format_data:
+                format_info = format_data['video']
+                format_info['quality'] = quality
+                video_formats.append(format_info)
+        
+        # Подготавливаем аудио форматы
+        audio_formats = []
+        for quality, format_data in formats.get('formats', {}).items():
+            if 'audio' in format_data:
+                format_info = format_data['audio']
+                format_info['quality'] = quality
+                audio_formats.append(format_info)
+        
+        # Формируем полный ответ
+        combined_info = {
+            **video_info,
+            'video_formats': video_formats,
+            'audio_formats': audio_formats
+        }
+        
+        # Валидируем через схему
+        schema = CombinedVideoInfoSchema()
+        result = schema.dump(combined_info)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error getting combined video info: {str(e)}")
+        return jsonify({'error': str(e)}), 400

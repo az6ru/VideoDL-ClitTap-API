@@ -11,3 +11,6 @@ psycopg2-binary>=2.9.10
 python-dotenv>=1.0.0
 gunicorn>=21.2.0
 Flask-CORS>=4.0.0
+transliterate>=1.10.2
+requests>=2.31.0
+ffmpeg-python>=0.2.0

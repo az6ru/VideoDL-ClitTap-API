@@ -250,6 +250,73 @@
             "description": "Error message if download failed"
           }
         }
+      },
+      "CombinedVideoInfo": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Название видео"
+          },
+          "author": {
+            "type": "string",
+            "description": "Автор видео"
+          },
+          "description": {
+            "type": "string",
+            "description": "Описание видео"
+          },
+          "duration": {
+            "type": "integer",
+            "description": "Длительность в секундах"
+          },
+          "thumbnail": {
+            "type": "string",
+            "description": "URL превью видео"
+          },
+          "view_count": {
+            "type": "integer",
+            "description": "Количество просмотров"
+          },
+          "like_count": {
+            "type": "integer",
+            "description": "Количество лайков"
+          },
+          "comment_count": {
+            "type": "integer",
+            "description": "Количество комментариев"
+          },
+          "video_formats": {
+            "type": "array",
+            "description": "Список доступных видео форматов",
+            "items": {
+              "$ref": "#/components/schemas/Format"
+            }
+          },
+          "audio_formats": {
+            "type": "array",
+            "description": "Список доступных аудио форматов",
+            "items": {
+              "$ref": "#/components/schemas/Format"
+            }
+          },
+          "upload_date": {
+            "type": "string",
+            "description": "Дата загрузки видео"
+          },
+          "webpage_url": {
+            "type": "string",
+            "description": "URL страницы видео"
+          },
+          "channel_url": {
+            "type": "string",
+            "description": "URL канала"
+          },
+          "channel_id": {
+            "type": "string",
+            "description": "ID канала"
+          }
+        }
       }
     }
   },
@@ -784,6 +851,50 @@
             "ApiKeyAuth": []
           }
         ]
+      }
+    },
+    "/combined-info": {
+      "get": {
+        "tags": ["video"],
+        "summary": "Получить полную информацию о видео",
+        "description": "Возвращает всю информацию о видео, включая метаданные и доступные форматы",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "URL видео для получения информации"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успешный ответ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CombinedVideoInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка в параметрах запроса"
+          },
+          "401": {
+            "description": "Отсутствует или неверный API ключ"
+          },
+          "500": {
+            "description": "Внутренняя ошибка сервера"
+          }
+        }
       }
     }
   },

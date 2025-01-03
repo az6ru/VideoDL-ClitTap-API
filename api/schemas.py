@@ -26,3 +26,24 @@ class DownloadSchema(Schema):
     completed_at = fields.DateTime()
     error = fields.Str()
     file_path = fields.Str()
+
+class CombinedVideoInfoSchema(Schema):
+    # Основная информация о видео
+    title = fields.Str(required=True)
+    author = fields.Str()
+    description = fields.Str()
+    duration = fields.Int()
+    thumbnail = fields.Str()
+    view_count = fields.Int()
+    like_count = fields.Int()
+    comment_count = fields.Int()
+    
+    # Форматы видео и аудио
+    video_formats = fields.List(fields.Dict(), required=True)
+    audio_formats = fields.List(fields.Dict(), required=True)
+    
+    # Дополнительная информация
+    upload_date = fields.Str()
+    webpage_url = fields.Str()
+    channel_url = fields.Str()
+    channel_id = fields.Str()
