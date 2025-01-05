@@ -1123,3 +1123,46 @@ def get_combined_info():
     except Exception as e:
         logger.error(f"Error getting combined video info: {str(e)}")
         return jsonify({'error': str(e)}), 400
+
+@api_bp.route('/download/<task_id>/cancel', methods=['POST'])
+@require_api_key
+def cancel_download(task_id):
+    """Отменить задачу загрузки"""
+    try:
+        # Проверяем валидность UUID
+        task_uuid = UUID(task_id)
+        
+        # Находим задачу
+        download = Download.query.filter_by(task_id=task_uuid).first()
+        
+        if not download:
+            return jsonify({
+                'error': 'Задача не найдена',
+                'message': f'Задача с ID {task_id} не существует'
+            }), 404
+            
+        # Пытаемся отменить задачу
+        if download.cancel():
+            db.session.commit()
+            return jsonify({
+                'message': 'Задача успешно отменена',
+                'task_id': str(download.task_id),
+                'status': download.status
+            })
+        else:
+            return jsonify({
+                'error': 'Невозможно отменить задачу',
+                'message': f'Задача находится в статусе {download.status} и не может быть отменена'
+            }), 400
+            
+    except ValueError:
+        return jsonify({
+            'error': 'Неверный формат ID задачи',
+            'message': 'ID задачи должен быть в формате UUID'
+        }), 400
+    except Exception as e:
+        logger.error(f"Error cancelling download task: {str(e)}")
+        return jsonify({
+            'error': 'Внутренняя ошибка сервера',
+            'message': str(e)
+        }), 500

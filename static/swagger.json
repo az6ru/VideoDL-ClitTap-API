@@ -170,7 +170,7 @@
           },
           "status": {
             "type": "string",
-            "enum": ["pending", "downloading", "completed", "error"],
+            "enum": ["pending", "downloading", "completed", "error", "cancelled"],
             "description": "Current status of the download"
           },
           "progress": {
@@ -251,70 +251,33 @@
           }
         }
       },
-      "CombinedVideoInfo": {
+      "CancelResponse": {
         "type": "object",
         "properties": {
-          "title": {
+          "message": {
             "type": "string",
-            "description": "Название видео"
+            "description": "Success message"
           },
-          "author": {
+          "task_id": {
             "type": "string",
-            "description": "Автор видео"
+            "description": "ID of the cancelled task"
           },
-          "description": {
+          "status": {
             "type": "string",
-            "description": "Описание видео"
-          },
-          "duration": {
-            "type": "integer",
-            "description": "Длительность в секундах"
-          },
-          "thumbnail": {
+            "description": "New status of the task"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
             "type": "string",
-            "description": "URL превью видео"
+            "description": "Error type"
           },
-          "view_count": {
-            "type": "integer",
-            "description": "Количество просмотров"
-          },
-          "like_count": {
-            "type": "integer",
-            "description": "Количество лайков"
-          },
-          "comment_count": {
-            "type": "integer",
-            "description": "Количество комментариев"
-          },
-          "video_formats": {
-            "type": "array",
-            "description": "Список доступных видео форматов",
-            "items": {
-              "$ref": "#/components/schemas/Format"
-            }
-          },
-          "audio_formats": {
-            "type": "array",
-            "description": "Список доступных аудио форматов",
-            "items": {
-              "$ref": "#/components/schemas/Format"
-            }
-          },
-          "upload_date": {
+          "message": {
             "type": "string",
-            "description": "Дата загрузки видео"
-          },
-          "webpage_url": {
-            "type": "string",
-            "description": "URL страницы видео"
-          },
-          "channel_url": {
-            "type": "string",
-            "description": "URL канала"
-          },
-          "channel_id": {
-            "type": "string",
-            "description": "ID канала"
+            "description": "Detailed error message"
           }
         }
       }
@@ -893,6 +856,72 @@
           },
           "500": {
             "description": "Внутренняя ошибка сервера"
+          }
+        }
+      }
+    },
+    "/download/{task_id}/cancel": {
+      "post": {
+        "summary": "Отменить задачу загрузки",
+        "description": "Отменяет выполняющуюся или ожидающую задачу загрузки",
+        "tags": ["downloads"],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "ID задачи загрузки",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Задача успешно отменена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Неверный формат ID задачи или задача не может быть отменена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Задача не найдена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Внутренняя ошибка сервера",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

@@ -13,7 +13,7 @@ class Download(db.Model):
     format = db.Column(db.String)
     video_format = db.Column(db.String)
     audio_format = db.Column(db.String)
-    status = db.Column(db.String, default='pending')
+    status = db.Column(db.String, default='pending')  # pending, processing, completed, error, cancelled
     progress = db.Column(db.Float, default=0.0)
     file_path = db.Column(db.String)
     error = db.Column(db.String)
@@ -22,6 +22,15 @@ class Download(db.Model):
     completed_at = db.Column(db.DateTime)
     title = db.Column(db.String)
     convert_to_mp3 = db.Column(db.Boolean, default=False)
+
+    def cancel(self):
+        """Отменить задачу загрузки"""
+        if self.status in ['pending', 'processing']:
+            self.status = 'cancelled'
+            self.error = 'Task cancelled by user'
+            self.completed_at = datetime.utcnow()
+            return True
+        return False
 
 class ApiKey(db.Model):
     __tablename__ = 'api_keys'
