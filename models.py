@@ -13,7 +13,7 @@ class Download(db.Model):
     format = db.Column(db.String)
     video_format = db.Column(db.String)
     audio_format = db.Column(db.String)
-    status = db.Column(db.String, default='pending')  # pending, processing, completed, error, cancelled
+    status = db.Column(db.String, default='pending')  # pending, processing, completed, error, cancelled, downloading
     progress = db.Column(db.Float, default=0.0)
     file_path = db.Column(db.String)
     error = db.Column(db.String)
@@ -25,7 +25,7 @@ class Download(db.Model):
 
     def cancel(self):
         """Отменить задачу загрузки"""
-        if self.status in ['pending', 'processing']:
+        if self.status in ['pending', 'processing', 'downloading']:
             self.status = 'cancelled'
             self.error = 'Task cancelled by user'
             self.completed_at = datetime.utcnow()

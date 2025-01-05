@@ -21,8 +21,53 @@ logger.setLevel(logging.INFO)
 downloads_dir = os.path.abspath('downloads')
 os.makedirs(downloads_dir, exist_ok=True)
 
-# Global variables
-cleanup_thread = None
+class DownloadProgress:
+    def __init__(self, task_id):
+        self.task_id = task_id
+        self._should_stop = False
+        
+    def check_cancelled(self):
+        """Проверяет, была ли отменена задача"""
+        with db.session.begin():
+            download = Download.query.filter_by(task_id=self.task_id).first()
+            if download and download.status == 'cancelled':
+                self._should_stop = True
+                return True
+        return False
+        
+    def progress_hook(self, d):
+        """Хук для обновления прогресса и проверки отмены"""
+        if self._should_stop:
+            raise Exception("Download cancelled by user")
+            
+        if d['status'] == 'downloading':
+            try:
+                with db.session.begin():
+                    download = Download.query.filter_by(task_id=self.task_id).first()
+                    if not download:
+                        return
+                        
+                    # Проверяем отмену
+                    if download.status == 'cancelled':
+                        self._should_stop = True
+                        raise Exception("Download cancelled by user")
+                        
+                    # Обновляем прогресс
+                    if 'total_bytes' in d:
+                        progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
+                    elif 'total_bytes_estimate' in d:
+                        progress = (d['downloaded_bytes'] / d['total_bytes_estimate']) * 100
+                    else:
+                        progress = 0
+                        
+                    download.progress = progress
+                    download.status = 'downloading'
+                    db.session.add(download)
+                    
+            except Exception as e:
+                logger.error(f"Error updating progress: {str(e)}")
+                if "cancelled" in str(e).lower():
+                    raise
 
 @lru_cache(maxsize=100)
 def get_cached_video_info(url):
@@ -680,17 +725,111 @@ def start_cleanup_thread(app, retention_hours=None):
     )
     cleanup_thread.start()
 
-def start_download_task(task_id, url, video_format_id=None, audio_format_id=None, format_id=None, audio_only=False, convert_to_mp3=False):
-    """Запуск асинхронной задачи на скачивание"""
-    thread = threading.Thread(target=download_video,
-                            args=(task_id, url),
-                            kwargs={
-                                'video_format_id': video_format_id,
-                                'audio_format_id': audio_format_id,
-                                'format_id': format_id,
-                                'audio_only': audio_only,
-                                'convert_to_mp3': convert_to_mp3
-                            })
+def start_download_task(task_id, url, format_id=None, video_format_id=None, audio_format_id=None, audio_only=False, convert_to_mp3=False):
+    """Start async download task"""
+    def download_task():
+        try:
+            # Создаем директорию для загрузки
+            task_dir = os.path.join(downloads_dir, str(task_id))
+            os.makedirs(task_dir, exist_ok=True)
+            
+            # Инициализируем прогресс
+            progress = DownloadProgress(task_id)
+            
+            # Настройки для yt-dlp
+            ydl_opts = {
+                'format': format_id if format_id else None,
+                'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
+                'progress_hooks': [progress.progress_hook],
+                'quiet': True,
+                'no_warnings': True
+            }
+            
+            if not format_id:
+                if audio_only:
+                    ydl_opts['format'] = audio_format_id
+                    if convert_to_mp3:
+                        ydl_opts['postprocessors'] = [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': 'mp3',
+                            'preferredquality': '192'
+                        }]
+                else:
+                    ydl_opts['format'] = f"{video_format_id}+{audio_format_id}"
+                    
+            with db.session.begin():
+                download = Download.query.filter_by(task_id=task_id).first()
+                if not download:
+                    return
+                    
+                download.status = 'processing'
+                db.session.add(download)
+            
+            # Начинаем загрузку
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Получаем информацию о видео
+                info = ydl.extract_info(url, download=False)
+                
+                # Обновляем заголовок
+                with db.session.begin():
+                    download = Download.query.filter_by(task_id=task_id).first()
+                    if download:
+                        download.title = info.get('title')
+                        db.session.add(download)
+                
+                # Проверяем отмену перед началом загрузки
+                if progress.check_cancelled():
+                    raise Exception("Download cancelled by user")
+                
+                # Загружаем видео
+                ydl.download([url])
+            
+            # Проверяем отмену после загрузки
+            if progress.check_cancelled():
+                raise Exception("Download cancelled by user")
+            
+            # Находим загруженный файл
+            downloaded_files = glob.glob(os.path.join(task_dir, '*'))
+            if not downloaded_files:
+                raise Exception("No files downloaded")
+                
+            downloaded_file = max(downloaded_files, key=os.path.getctime)
+            
+            with db.session.begin():
+                download = Download.query.filter_by(task_id=task_id).first()
+                if download:
+                    download.status = 'completed'
+                    download.progress = 100
+                    download.file_path = downloaded_file
+                    download.completed_at = datetime.utcnow()
+                    db.session.add(download)
+                    
+        except Exception as e:
+            logger.error(f"Error downloading video: {str(e)}")
+            try:
+                with db.session.begin():
+                    download = Download.query.filter_by(task_id=task_id).first()
+                    if download:
+                        if "cancelled" in str(e).lower():
+                            download.status = 'cancelled'
+                        else:
+                            download.status = 'error'
+                        download.error = str(e)
+                        download.completed_at = datetime.utcnow()
+                        db.session.add(download)
+            except Exception as db_error:
+                logger.error(f"Error updating download status: {str(db_error)}")
+                
+            # Очищаем временные файлы при ошибке
+            try:
+                task_dir = os.path.join(downloads_dir, str(task_id))
+                if os.path.exists(task_dir):
+                    shutil.rmtree(task_dir)
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up task directory: {str(cleanup_error)}")
+    
+    # Запускаем задачу в отдельном потоке
+    thread = threading.Thread(target=download_task)
     thread.daemon = True
     thread.start()
 
